@@ -4,7 +4,7 @@ import * as M from './model.js';
 import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js';
 import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG } from './art.js';
 import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults } from './store.js';
-import { sfx, setSound, unlockAudio, speak, stopSpeaking, canSpeak } from './audio.js';
+import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking, canSpeak, listVoices, onVoicesChanged } from './audio.js';
 
 // ---------------------------------------------------------------- setup
 function mount() {
@@ -34,6 +34,7 @@ let parentMsg = '';
 let toastTimer = null;
 
 const L = () => data.settings.lang;
+const speak = (text, lang) => speakRaw(text, lang, (data.settings.voice || {})[lang] || '');
 const T = (k, p) => t(L(), k, p);
 const W = () => STR[L()] || STR.en;
 const reduceMQ = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
@@ -101,6 +102,7 @@ function render() {
     const el = root.querySelector(`[data-k="${focusKey}"]`);
     if (el && !el.disabled) el.focus({ preventScroll: true });
   }
+  if (screen === 'play' && play) setupInk();
   if (play) play.fresh = new Map();
 }
 const update = render;
@@ -294,6 +296,11 @@ function initPlay() {
     counting: false,
     entry: c.solved ? String(c.p.answer) : '',
     entryStale: false,
+    cells: c.solved ? answerCells(c.p.answer) : { tens: '', ones: '' },
+    activeCell: 'ones',
+    drawing: false,
+    strokes: [],
+    carryFresh: false,
     status: c.solved ? 'solved' : 'ask',
     guided: null,
     focusCol: null,
@@ -307,6 +314,36 @@ function initPlay() {
     fresh: new Map(),
   };
   setBubble(() => (c.solved ? solvedBubble(null) : introBubble()));
+}
+
+const answerCells = (n) => ({ tens: n >= 10 ? String(tensOf(n)) : '', ones: String(onesOf(n)) });
+
+// The final answer is typed into the Tens and Ones boxes, like on paper.
+function usingCells() {
+  if (!play) return false;
+  if (play.status === 'ask') return true;
+  const st = curStep();
+  return play.status === 'guided' && !!st && st.kind === 'ask' && st.ask === 'total';
+}
+function clearCells() {
+  play.cells = { tens: '', ones: '' };
+  play.activeCell = 'ones';
+  play.entryStale = false;
+}
+// null = blank, 'needOnes' = only the tens box is filled
+function cellsValue() {
+  if (play.entryStale) return null;
+  const { tens, ones } = play.cells;
+  if (tens === '' && ones === '') return null;
+  if (ones === '') return 'needOnes';
+  return Number(tens || 0) * 10 + Number(ones);
+}
+function selectCell(col) {
+  if (!usingCells() || play.status === 'solved') return;
+  if (play.entryStale) clearCells();
+  play.activeCell = col;
+  sfx.tap();
+  update();
 }
 
 // The bubble is stored as a function so it can be rebuilt after a language switch.
@@ -357,12 +394,16 @@ function problemCard() {
   const c = data.active.current;
   const p = play.p;
   const solved = play.status === 'solved';
-  return h('div', { class: 'rm-card rm-problem' },
+  return h('div', { class: `rm-card rm-problem ${play.drawing ? 'drawing' : ''}` },
     c.story != null ? h('p', { class: 'rm-story' }, storyText(L(), p, c.story)) : null,
     h('p', { class: 'rm-eq', 'aria-label': T('whatIs', { a: p.a, b: p.b, opw: p.op === '+' ? W().plusWord : W().minusWord }) },
       h('span', { class: 'num-a' }, String(p.a)), ` ${opSym(p.op)} `, h('span', { class: 'num-b' }, String(p.b)), ' = ',
       h('span', { class: solved ? 'num-ans' : 'num-q' }, solved ? String(p.answer) : '?')),
-    writtenEl());
+    writtenEl(),
+    h('canvas', { class: 'rm-ink', 'aria-hidden': 'true' }),
+    play.drawing ? h('div', { class: 'rm-ink-bar' },
+      button(T('undo'), undoStroke, { cls: 'small soft', ic: 'undo', k: 'ink-undo', disabled: !play.strokes.length }),
+      button(T('eraseAll'), eraseInk, { cls: 'small soft', ic: 'eraser', k: 'ink-erase', disabled: !play.strokes.length })) : null);
 }
 
 function curStep() {
@@ -379,26 +420,45 @@ function writtenEl() {
   if (play.status === 'solved') {
     ansT = p.answer >= 10 ? String(tensOf(p.answer)) : '';
     ansO = String(onesOf(p.answer));
-  } else if (play.status !== 'guided' || (st && st.ask === 'total')) {
-    const e = play.entryStale ? '' : play.entry;
-    if (e.length === 1) ansO = e;
-    else if (e.length === 2) { ansT = e[0]; ansO = e[1]; }
+  } else if (usingCells()) {
+    ansT = play.cells.tens;
+    ansO = play.cells.ones;
   }
+  void st;
   if (!ansO && play.marks.ones != null) { ansO = String(play.marks.ones); penO = true; }
   if (!ansT && play.marks.tens != null && play.marks.tens > 0) { ansT = String(play.marks.tens); penT = true; }
 
-  let markT = '', markO = '';
-  if (traded && p.op === '+') markT = '1';
-  if (traded && p.op === '-') { markT = String(a10 - 1); markO = String(a1 + 10); }
+  // Carrying (addition) or trading (subtraction) is drawn as an arrow between the columns,
+  // and the moved number glides into place the moment it happens.
+  const fresh = play.carryFresh && !reduced();
+  const arrow = (dir) => h('span', { class: `rm-w-arrow ${dir} ${fresh ? 'fresh' : ''}`, html: CARRY_ARROW, 'aria-hidden': 'true' });
+  let markT = null, markO = null;
+  if (traded && p.op === '+') {
+    markT = h('span', { class: 'rm-w-markwrap' }, h('span', { class: `rm-carry ${fresh ? 'fly-left' : ''}` }, '1'), arrow('to-tens'));
+  }
+  if (traded && p.op === '-') {
+    markT = h('span', { class: 'rm-w-markwrap' }, h('span', { class: 'rm-borrow-t' }, String(a10 - 1)), arrow('to-ones'));
+    markO = h('span', { class: `rm-carry wide ${fresh ? 'fly-right' : ''}` }, String(a1 + 10));
+  }
   const cell = (txt, col, extra = '') => h('span', { class: `rm-w-c ${col} ${fc === col ? 'focus' : ''} ${extra}` }, txt);
-  return h('div', { class: 'rm-written', 'aria-hidden': 'true' },
+  const cellsOn = usingCells() && play.status !== 'solved';
+  const box = (txt, col, pen) => h('button', {
+    type: 'button',
+    class: `rm-w-c ${col} rm-w-ans ${pen ? 'pencil' : ''} ${play.entryStale && !pen ? 'stale' : ''} ${cellsOn && play.activeCell === col ? 'active' : ''} ${fc === col ? 'focus' : ''}`,
+    'data-k': `cell-${col}`,
+    'aria-label': `${col === 'tens' ? T('tensCol') : T('onesCol')}: ${txt || '?'}`,
+    disabled: !cellsOn,
+    onclick: () => selectCell(col),
+  }, txt);
+  return h('div', { class: `rm-written ${traded ? 'traded' : ''}` },
     h('span', { class: 'rm-w-op' }), cell(T('tensCol'), 'tens', 'rm-w-h'), cell(T('onesCol'), 'ones', 'rm-w-h'),
     h('span', { class: 'rm-w-op' }), cell(markT, 'tens', 'rm-w-mark'), cell(markO, 'ones', 'rm-w-mark'),
     h('span', { class: 'rm-w-op' }), cell(String(a10), 'tens', `num-a ${traded && p.op === '-' ? 'struck' : ''}`), cell(String(a1), 'ones', `num-a ${traded && p.op === '-' ? 'struck' : ''}`),
     h('span', { class: 'rm-w-op' }, opSym(p.op)), cell(String(b10), 'tens', 'num-b'), cell(String(b1), 'ones', 'num-b'),
     h('span', { class: 'rm-w-line' }),
-    h('span', { class: 'rm-w-op' }), cell(ansT, 'tens', `rm-w-ans ${penT ? 'pencil' : ''}`), cell(ansO, 'ones', `rm-w-ans ${penO ? 'pencil' : ''}`));
+    h('span', { class: 'rm-w-op' }), box(ansT, 'tens', penT), box(ansO, 'ones', penO));
 }
+const CARRY_ARROW = '<svg viewBox="0 0 100 30" preserveAspectRatio="none"><path d="M88 26 C80 4 20 4 12 26" fill="none" stroke="#e8590c" stroke-width="4" stroke-linecap="round" vector-effect="non-scaling-stroke"/><path class="head-l" d="M4 18 L12 28 L20 17" fill="none" stroke="#e8590c" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/><path class="head-r" d="M80 17 L88 28 L96 18" fill="none" stroke="#e8590c" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>';
 
 function padEl() {
   const st = curStep();
@@ -407,6 +467,13 @@ function padEl() {
   const disabled = solved || (guided && (!st || st.kind !== 'ask'));
   let label = T('answerLabel');
   if (guided && st && st.kind === 'ask') label = st.ask === 'ones' ? T('askOnes') : st.ask === 'tens' ? T('askTens') : T('askTotal');
+  const cellsOn = usingCells();
+  let shown = play.entry;
+  if (cellsOn) {
+    label = T('typingIn', { box: play.activeCell === 'ones' ? T('onesCol') : T('tensCol') });
+    const { tens, ones } = play.cells;
+    shown = tens ? `${tens}${ones || '?'}` : ones;
+  }
   const key = (d) => button(String(d), () => press(String(d)), { cls: 'rm-key', k: `key-${d}`, disabled });
   const last = data.active.index + 1 >= data.active.length;
   return h('div', { class: `rm-pad ${disabled ? 'off' : ''}` },
@@ -414,7 +481,8 @@ function padEl() {
       ? button(last ? T('finish') : T('next'), goNext, { cls: 'primary big rm-next', ic: 'next', k: 'next' })
       : h('div', { class: 'rm-entry' },
         h('span', { class: 'rm-entry-l' }, label),
-        h('span', { class: `rm-entry-v ${play.entryStale ? 'stale' : ''}` }, play.entry || ' ')),
+        h('span', { class: `rm-entry-v ${play.entryStale ? 'stale' : ''}` }, shown || ' '),
+        cellsOn ? h('span', { class: 'rm-entry-tip' }, T('tapBox')) : null),
     h('div', { class: 'rm-keys' },
       [1, 2, 3, 4, 5, 6, 7, 8, 9].map(key),
       button(null, del, { cls: 'rm-key soft', ic: 'del', aria: T('del'), k: 'key-del', disabled }),
@@ -427,6 +495,7 @@ function toolsEl() {
   return [
     button(T('help'), startGuided, { ic: 'help', k: 't-help', disabled: st !== 'ask', cls: 'tool' }),
     button(play.showBlocks ? T('hideBlocks') : T('blocks'), toggleBlocks, { ic: 'blocks', k: 't-blocks', disabled: st === 'guided', cls: 'tool' }),
+    button(play.drawing ? T('drawDone') : T('draw'), toggleDraw, { ic: 'pencil', k: 't-draw', cls: `tool ${play.drawing ? 'on' : ''}`, pressed: play.drawing }),
     button(T('read'), readProblem, { ic: 'read', k: 't-read', cls: 'tool' }),
     button(T('takeBreak'), () => go('break'), { ic: 'rest', k: 't-break', cls: 'tool' }),
   ];
@@ -455,6 +524,15 @@ function press(d) {
   if (play.status === 'solved') return;
   const st = curStep();
   if (play.status === 'guided' && (!st || st.kind !== 'ask')) return;
+  if (usingCells()) {
+    if (play.entryStale) clearCells();
+    play.cells[play.activeCell] = d;
+    // like on paper: ones first, then move over to the tens box
+    if (play.activeCell === 'ones' && play.cells.tens === '') play.activeCell = 'tens';
+    sfx.tap();
+    update();
+    return;
+  }
   if (play.entryStale) { play.entry = ''; play.entryStale = false; }
   if (play.entry === '0') play.entry = '';
   if (play.entry.length >= 2) return;
@@ -465,6 +543,14 @@ function press(d) {
 
 function del() {
   if (play.status === 'solved') return;
+  if (usingCells()) {
+    if (play.entryStale) { clearCells(); update(); return; }
+    const a = play.activeCell;
+    if (play.cells[a] !== '') play.cells[a] = '';
+    else { const o = a === 'ones' ? 'tens' : 'ones'; play.cells[o] = ''; play.activeCell = o; }
+    update();
+    return;
+  }
   if (play.entryStale) { play.entry = ''; play.entryStale = false; }
   play.entry = play.entry.slice(0, -1);
   update();
@@ -472,7 +558,14 @@ function del() {
 
 function submit() {
   if (!play || play.status === 'solved' || play.leaving) return;
-  const n = parseEntry(play.entryStale ? '' : play.entry);
+  const n = usingCells() ? cellsValue() : parseEntry(play.entryStale ? '' : play.entry);
+  if (n === 'needOnes') {
+    play.activeCell = 'ones';
+    toast(T('fillOnes'));
+    sfx.soft();
+    update();
+    return;
+  }
   if (n === null) {
     toast(T('blankEntry'));
     sfx.soft();
@@ -508,7 +601,7 @@ function submit() {
 
 function tryAgain() {
   play.entry = '';
-  play.entryStale = false;
+  clearCells();
   setBubble(() => ({ mood: 'happy', text: T('prompt', { pick: data.active.current.prompt }) }));
   update();
 }
@@ -536,7 +629,7 @@ function startGuided(lead) {
   play.counting = false;
   play.marks = {};
   play.entry = '';
-  play.entryStale = false;
+  clearCells();
   play.status = 'guided';
   play.guided = { steps: buildSteps(play.p), i: 0, wrongs: 0, startTrades: 0, lead: typeof lead === 'string' ? lead : null };
   enterStep();
@@ -571,6 +664,7 @@ function enterStep() {
   play.guided.startTrades = play.model.trades;
   play.guided.wrongs = 0;
   play.focusCol = st.focus || null;
+  if (st.kind === 'ask' && st.ask === 'total') clearCells();
   setBubble(stepBubble);
   if (data.settings.autoRead) speak([play.bubble.lead, play.bubble.text].filter(Boolean).join(' '), L());
   update();
@@ -621,6 +715,7 @@ function solve() {
   play.solvedAt = Date.now();
   play.entry = String(p.answer);
   play.entryStale = false;
+  play.cells = answerCells(p.answer);
   play.focusCol = null;
   play.marks = {};
   if (!c.awarded) {
@@ -726,25 +821,139 @@ function act(fn) {
   const m = play.model;
   const before = new Map(m.pieces.map((x) => [x.id, x.state]));
   const tr = m.trades;
+  // where a trade starts, so we can show the pieces travelling
+  const srcEl = m.op === '+' ? root.querySelector('.rm-frame.full') : [...root.querySelectorAll('.rm-col.tens .rm-rod:not(.gone)')].pop();
+  const src = srcEl ? { rect: srcEl.getBoundingClientRect(), html: srcEl.outerHTML } : null;
   if (!fn(m)) return false;
   play.fresh = new Map();
+  const newIds = [];
   for (const x of m.pieces) {
     const was = before.get(x.id);
     if (was !== x.state) play.fresh.set(x.id, x.state === 'gone' ? 'gone' : 'in');
+    if (was === undefined) newIds.push(x);
   }
   play.movedBlocks = true;
-  if (m.trades > tr) { play.tradedEver = true; sfx.trade(); } else sfx.pop();
+  const traded = m.trades > tr;
+  if (traded) { play.tradedEver = true; play.carryFresh = true; sfx.trade(); } else sfx.pop();
   data.active.current.blocksUsed = true;
+  let advanced = false;
   if (play.status === 'guided') {
     const st = curStep();
     if (st && st.kind === 'act' && M.actionDone(m, st.act, play.guided.startTrades)) {
       advanceStep();
-      return true;
+      advanced = true;
     }
   }
-  update();
+  if (!advanced) update();
+  play.carryFresh = false;
+  if (traded && src) {
+    const targets = newIds.map((x) => root.querySelector(`[data-k="pc-${x.id}"]`)).filter(Boolean);
+    const dest = m.op === '+' ? targets[0] : root.querySelector('.rm-col.ones .rm-col-b');
+    flyPieces(src, dest, targets);
+  }
   return true;
 }
+
+// The ten (or the ten ones) visibly travel to the other column.
+function flyPieces(src, dest, hide) {
+  if (!dest || reduced() || typeof Element.prototype.animate !== 'function') return;
+  const t = dest.getBoundingClientRect();
+  const r = src.rect;
+  if (!r.width || !t.width) return;
+  const g = h('div', { class: 'rm-flyer', html: src.html, 'aria-hidden': 'true' });
+  Object.assign(g.style, { left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px` });
+  root.append(g);
+  hide.forEach((el) => { el.style.visibility = 'hidden'; });
+  const dx = t.left + t.width / 2 - (r.left + r.width / 2);
+  const dy = t.top + t.height / 2 - (r.top + r.height / 2);
+  const sx = Math.max(0.15, Math.min(4, t.width / r.width));
+  const sy = Math.max(0.15, Math.min(4, t.height / r.height));
+  const anim = g.animate([
+    { transform: 'translate(0px, 0px) scale(1, 1)' },
+    { transform: `translate(${dx * 0.5}px, ${dy * 0.5 - 50}px) scale(${(1 + sx) / 2}, ${(1 + sy) / 2})`, offset: 0.5 },
+    { transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})` },
+  ], { duration: 1000, easing: 'ease-in-out' });
+  const done = () => { g.remove(); hide.forEach((el) => { el.style.visibility = ''; }); };
+  anim.onfinish = done;
+  anim.oncancel = done;
+}
+
+// ---------------------------------------------------------------- finger drawing
+function toggleDraw() {
+  play.drawing = !play.drawing;
+  sfx.tap();
+  update();
+}
+function undoStroke() { play.strokes.pop(); update(); }
+function eraseInk() { play.strokes = []; update(); }
+
+function drawStroke(ctx, st) {
+  const pts = st.pts;
+  if (pts.length === 1) {
+    ctx.beginPath();
+    ctx.arc(pts[0][0], pts[0][1], pts[0][2] / 2, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
+  for (let i = 1; i < pts.length; i++) {
+    ctx.lineWidth = pts[i][2];
+    ctx.beginPath();
+    ctx.moveTo(pts[i - 1][0], pts[i - 1][1]);
+    ctx.lineTo(pts[i][0], pts[i][1]);
+    ctx.stroke();
+  }
+}
+
+function setupInk() {
+  const cv = root.querySelector('.rm-ink');
+  if (!cv || !play) return;
+  const r = cv.parentElement.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  cv.width = Math.max(1, Math.round(r.width * dpr));
+  cv.height = Math.max(1, Math.round(r.height * dpr));
+  cv.style.width = `${r.width}px`;
+  cv.style.height = `${r.height}px`;
+  const ctx = cv.getContext('2d');
+  if (!ctx) return;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = '#3d2f8f';
+  ctx.fillStyle = '#3d2f8f';
+  play.strokes.forEach((st) => drawStroke(ctx, st));
+  if (cv.dataset.bound) return;
+  cv.dataset.bound = '1';
+  let cur = null, pid = null;
+  const width = (e) => (e.pointerType === 'pen' ? 2 + (e.pressure || 0.5) * 4 : 5);
+  const at = (e) => { const b = cv.getBoundingClientRect(); return [e.clientX - b.left, e.clientY - b.top, width(e)]; };
+  cv.addEventListener('pointerdown', (e) => {
+    if (!play || !play.drawing || cur) return;
+    e.preventDefault();
+    pid = e.pointerId;
+    try { cv.setPointerCapture(pid); } catch (err) { /* ignore */ }
+    cur = { pts: [at(e)] };
+    play.strokes.push(cur);
+    drawStroke(ctx, cur);
+  });
+  cv.addEventListener('pointermove', (e) => {
+    if (!cur || e.pointerId !== pid) return;
+    e.preventDefault();
+    const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+    for (const ev of (evs.length ? evs : [e])) {
+      cur.pts.push(at(ev));
+      drawStroke(ctx, { pts: cur.pts.slice(-2) });
+    }
+  });
+  const end = (e) => {
+    if (!cur || e.pointerId !== pid) return;
+    cur = null;
+    pid = null;
+    update(); // turns on Undo / Erase
+  };
+  cv.addEventListener('pointerup', end);
+  cv.addEventListener('pointercancel', end);
+}
+window.addEventListener('resize', () => { if (screen === 'play' && play) setupInk(); });
 
 function guidedWait() {
   toast(T('g_wait'));
@@ -909,6 +1118,7 @@ function matPanel() {
   if (!guided && play.status !== 'solved') {
     if (m.op === '+') {
       if (c.onesIn >= 10) hint = T('tooManyOnes');
+      else if (m.trades > 0) hint = T('carriedHint');
     } else {
       const left = M.takeLeft(m);
       if (left.tens + left.ones === 0) hint = T('allTaken');
@@ -1064,6 +1274,7 @@ function viewParent() {
       seg(T('p_lang'), st.lang, [['en', 'English'], ['es', 'Español']], (v) => { st.lang = v; }),
       seg(T('p_sound'), st.sound, [[true, T('p_on')], [false, T('p_off')]], (v) => { st.sound = v; setSound(v); }),
       seg(T('p_autoRead'), st.autoRead, [[true, T('p_on')], [false, T('p_off')]], (v) => { st.autoRead = v; }),
+      voiceField(),
       seg(T('p_motion'), st.motion, [['auto', T('p_motionAuto')], ['reduce', T('p_motionReduce')]], (v) => { st.motion = v; })),
     h('section', { class: 'rm-card rm-p-sec' },
       h('h3', { class: 'rm-h3' }, T('p_progress')),
@@ -1097,6 +1308,26 @@ function viewParent() {
         : button(T('p_reset'), () => { parentConfirm = true; update(); }, { cls: 'soft', ic: 'reset', k: 'reset' })));
 }
 
+function voiceField() {
+  const lang = L();
+  const voices = canSpeak() ? listVoices(lang) : [];
+  if (!data.settings.voice) data.settings.voice = { en: '', es: '' };
+  const cur = data.settings.voice[lang] || '';
+  const sel = h('select', {
+    class: 'rm-select', 'aria-label': T('p_voice'), 'data-k': 'voice-select',
+    onchange: (e) => { data.settings.voice[lang] = e.target.value; save(data); speak(T('voiceSample'), lang); },
+  },
+  h('option', { value: '' }, T('p_voiceAuto')),
+  voices.map((v) => h('option', { value: v.name, selected: v.name === cur }, `${v.nice ? '\u2605 ' : ''}${v.name} (${v.lang})`)));
+  return h('div', { class: 'rm-field' },
+    h('div', { class: 'rm-field-l' }, T('p_voice')),
+    h('div', { class: 'rm-seg' },
+      sel,
+      button(T('p_voiceTest'), () => readAloud(T('voiceSample')), { cls: 'small', ic: 'read', k: 'voice-test' })),
+    canSpeak() && !voices.length ? h('p', { class: 'rm-small' }, T('p_noVoices')) : null,
+    h('p', { class: 'rm-small' }, T('p_voiceTip')));
+}
+
 function resetProgress() {
   data = { ...defaults(), settings: data.settings, visits: 1 };
   play = null;
@@ -1113,6 +1344,7 @@ function onKey(e) {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (/^[0-9]$/.test(e.key)) { e.preventDefault(); press(e.key); }
   else if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); del(); }
+  else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && usingCells()) { e.preventDefault(); selectCell(e.key === 'ArrowLeft' ? 'tens' : 'ones'); }
   else if (e.key === 'Enter') {
     if (e.target && e.target.tagName === 'BUTTON' && root.contains(e.target)) return;
     e.preventDefault();
@@ -1122,6 +1354,7 @@ function onKey(e) {
 
 // ---------------------------------------------------------------- start
 document.addEventListener('keydown', onKey);
+onVoicesChanged(() => { if (screen === 'parent') update(); });
 if (reduceMQ && reduceMQ.addEventListener) reduceMQ.addEventListener('change', applyMotion);
 document.addEventListener('pointerdown', () => unlockAudio(), { once: true });
 if (data.active && data.active.current && isValidProblem(data.active.current.p)) initPlay();

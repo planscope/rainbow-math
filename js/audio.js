@@ -47,35 +47,90 @@ export const sfx = {
 // ---------------------------------------------------------------- speech
 export const canSpeak = () => typeof window !== 'undefined' && 'speechSynthesis' in window && typeof window.SpeechSynthesisUtterance === 'function';
 
-function pickVoice(lang) {
+// Warm, natural female voices that come with Apple, Google and Microsoft devices.
+// Higher score = picked first. Novelty and male voices are pushed to the bottom.
+const FEMALE = /\b(ava|samantha|allison|susan|zoe|zoey|nicky|karen|moira|tessa|serena|victoria|fiona|kathy|joelle|aria|jenny|michelle|emma|libby|sonia|natasha|clara|ana|ashley|sara|nora|flo|sandy|shelley|paulina|m[oó]nica|marisol|ang[eé]lica|isabela|francisca|soledad|dalia|elvira|helena|laura|paloma|lupe|sof[ií]a|ximena|larissa|google us english|google uk english female|google espa[nñ]ol)\b/i;
+const MALE = /\b(daniel|alex|fred|tom|aaron|arthur|gordon|rishi|oliver|jorge|juan|diego|carlos|pablo|reed|eddy|rocko|grandpa|ralph|junior|albert|evan|nathan|guy|andrew|brian|ryan|thomas|alvaro|jamie|lee)\b/i;
+const NOVELTY = /\b(bad news|bahh|bells|boing|bubbles|cellos|wobble|zarvox|trinoids|whisper|jester|organ|superstar|good news|deranged|hysterical|grandma)\b/i;
+const QUALITY = /(premium|enhanced|mejorad|natural|neural|siri)/i;
+
+function voiceScore(v, lang) {
+  const l = (v.lang || '').replace('_', '-').toLowerCase();
+  if (!l.startsWith(lang)) return -1;
+  let s = 1;
+  if (lang === 'en' && l === 'en-us') s += 3;
+  if (lang === 'es' && (l === 'es-mx' || l === 'es-us' || l === 'es-419')) s += 3;
+  if (FEMALE.test(v.name)) s += 6;
+  if (MALE.test(v.name)) s -= 8;
+  if (NOVELTY.test(v.name)) s -= 20;
+  if (QUALITY.test(v.name)) s += 5;
+  if (/^(ava|samantha|paulina|marisol)\b/i.test(v.name)) s += 2; // Apple's nicest gentle voices
+  return s;
+}
+
+export function listVoices(lang) {
+  try {
+    return (window.speechSynthesis.getVoices() || [])
+      .map((v) => ({ v, score: voiceScore(v, lang) }))
+      .filter((x) => x.score >= 0)
+      .sort((a, b) => b.score - a.score)
+      .map((x) => ({ name: x.v.name, lang: x.v.lang, nice: x.score >= 7 }));
+  } catch (e) { return []; }
+}
+
+function pickVoice(lang, wanted) {
   try {
     const voices = window.speechSynthesis.getVoices() || [];
-    const want = lang === 'es' ? ['es-MX', 'es-US', 'es-419', 'es'] : ['en-US', 'en-GB', 'en'];
-    for (const w of want) {
-      const v = voices.find((x) => x.lang && x.lang.replace('_', '-').toLowerCase().startsWith(w.toLowerCase()));
+    if (wanted) {
+      const v = voices.find((x) => x.name === wanted);
       if (v) return v;
     }
-  } catch (e) { /* ignore */ }
-  return null;
+    let best = null, bestScore = -1;
+    for (const v of voices) {
+      const sc = voiceScore(v, lang);
+      if (sc > bestScore) { best = v; bestScore = sc; }
+    }
+    return best;
+  } catch (e) { return null; }
+}
+
+// Read math out loud as words, not symbols.
+function speakable(text, lang) {
+  const es = lang === 'es';
+  return text
+    .replace(/\s*−\s*/g, es ? ' menos ' : ' minus ')
+    .replace(/(\d)\s*-\s*(\d)/g, es ? '$1 menos $2' : '$1 minus $2')
+    .replace(/\s*\+\s*/g, es ? ' más ' : ' plus ')
+    .replace(/\s*=\s*/g, es ? ' es igual a ' : ' equals ')
+    .replace(/→/g, ', ')
+    .replace(/…/g, '...');
 }
 
 // Only ever called from a user action (a tap), or right after one.
-export function speak(text, lang) {
+export function speak(text, lang, voiceName) {
   if (!canSpeak() || !text) return false;
   try {
     const s = window.speechSynthesis;
     s.cancel();
-    const u = new SpeechSynthesisUtterance(text.replace(/[−]/g, '-'));
+    const u = new SpeechSynthesisUtterance(speakable(text, lang));
     u.lang = lang === 'es' ? 'es-MX' : 'en-US';
-    const v = pickVoice(lang);
-    if (v) u.voice = v;
-    u.rate = 0.9;
-    u.pitch = 1.05;
+    const v = pickVoice(lang, voiceName);
+    if (v) { u.voice = v; u.lang = v.lang; }
+    // a little slower and a little brighter: friendly, patient, clear
+    u.rate = 0.88;
+    u.pitch = 1.12;
+    u.volume = 1;
     s.speak(u);
     return true;
   } catch (e) {
     return false;
   }
+}
+
+export function onVoicesChanged(fn) {
+  try {
+    if (canSpeak() && window.speechSynthesis.addEventListener) window.speechSynthesis.addEventListener('voiceschanged', fn);
+  } catch (e) { /* ignore */ }
 }
 
 export function stopSpeaking() {

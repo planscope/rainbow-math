@@ -241,6 +241,9 @@ const P = {
   star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
   reset: '<path d="M5 12a7 7 0 1 0 2-5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M4 4v4h4" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>',
   count: '<text x="12" y="16.5" text-anchor="middle" font-size="12" font-weight="700" font-family="sans-serif">123</text>',
+  pencil: '<path d="M4 20l1.2-4.6L15.5 5.1a2 2 0 0 1 2.8 0l.6.6a2 2 0 0 1 0 2.8L8.6 18.8z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M13.5 7l3.5 3.5" stroke="currentColor" stroke-width="2"/>',
+  undo: '<path d="M8 8H4V4" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M4.5 8.5A8 8 0 1 1 6 17" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>',
+  eraser: '<path d="M14 4l6 6-9 9H6l-3-3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 9l6 6M11 19h9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
   globe: '<circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18" fill="none" stroke="currentColor" stroke-width="1.6"/>',
 };
 export const icon = (name) => `<svg viewBox="0 0 24 24" class="rm-ic" aria-hidden="true" focusable="false" fill="currentColor">${P[name] || ''}</svg>`;

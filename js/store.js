@@ -17,6 +17,7 @@ export function defaults() {
       practice: 'choose', // 'choose' | 'add' | 'sub' | 'mix'
       regroup: 'auto', // 'off' | 'auto' | 'now'
       sessionLength: 5,
+      voice: { en: '', es: '' }, // chosen read-aloud voice per language ('' = best available)
     },
     progress: {
       skills: { A: skillStat(), B: skillStat(), C: skillStat(), D: skillStat() },
