@@ -2,8 +2,8 @@
 // tools/eleven.mjs). Each line is one whole recording, so it sounds natural.
 // The app never calls ElevenLabs. If a recording is missing it says false and
 // the app uses the device voice instead.
-import { audioCtx, stopSpeaking } from './audio.js?v=14';
-import { clipId } from './voicelines.js?v=14';
+import { audioCtx, stopSpeaking } from './audio.js?v=15';
+import { clipId, variants } from './voicelines.js?v=15';
 
 // iPad/iPhone play the recordings with a regular audio player (the kind videos use):
 // it is not silenced by the mute switch the way Web Audio can be.
@@ -48,7 +48,7 @@ let token = 0;
 // Everyone waits for the same download (two lines asked at once both get the list).
 function loadManifest() {
   if (!manifestLoading) {
-    manifestLoading = fetch(new URL('../audio/manifest.json?v=14', import.meta.url))
+    manifestLoading = fetch(new URL('../audio/manifest.json?v=15', import.meta.url))
       .then((r) => (r.ok ? r.json() : null))
       .then((m) => { manifest = m; return m; })
       .catch(() => null); // no recordings: device voice is used
@@ -68,6 +68,20 @@ function getBuffer(ctx, file) {
   return p;
 }
 
+// Each line has several takes; pick one at random, never the same one twice in a row.
+const lastTake = new Map();
+function pickTake(m, lang, key, v) {
+  const ok = [];
+  const n = variants(lang, key).length;
+  for (let x = 0; x < n; x++) if (m.clips[clipId(lang, key, v, x)]) ok.push(x);
+  if (!ok.length) return null;
+  const last = lastTake.get(`${lang}:${key}`);
+  const pool = ok.length > 1 ? ok.filter((x) => x !== last) : ok;
+  const x = pool[Math.floor(Math.random() * pool.length)];
+  lastTake.set(`${lang}:${key}`, x);
+  return m.clips[clipId(lang, key, v, x)];
+}
+
 export function stopClips() {
   token++;
   if (media && !media.paused) { try { media.pause(); } catch (e) { /* ignore */ } }
@@ -80,8 +94,10 @@ export async function preloadLines(lang, list) {
   const ctx = audioCtx();
   if (!m || !ctx) return;
   for (const [key, v] of list) {
-    const f = m.clips[clipId(lang, key, v)];
-    if (f) getBuffer(ctx, f).catch(() => {});
+    for (let x = 0; x < variants(lang, key).length; x++) {
+      const f = m.clips[clipId(lang, key, v, x)];
+      if (f) getBuffer(ctx, f).catch(() => {});
+    }
   }
 }
 
@@ -89,7 +105,7 @@ export async function preloadLines(lang, list) {
 export async function playLine(lang, key, v = null) {
   const my = ++token;
   const m = await loadManifest();
-  const file = m && m.clips && m.clips[clipId(lang, key, v)];
+  const file = m && m.clips ? pickTake(m, lang, key, v) : null;
   if (!file) { voiceInfo.last = { how: 'device', key, reason: m ? 'no recording for this line' : 'recordings list did not load' }; return false; }
   if (IOS && media && media.__unlocked) {
     const tag = m.generated ? `?g=${encodeURIComponent(m.generated)}` : '';

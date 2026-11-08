@@ -242,3 +242,21 @@ test('the level path climbs with stars and mixes skills', () => {
   for (let i = 0; i < 30; i++) recordPath(top, true);
   assert.equal(top.level, MAX_PATH_LEVEL);
 });
+
+// ---------------------------------------------------------------- guide voice lines
+import { allLines, variants, clipId, lineText } from '../js/voicelines.js';
+
+test('every voice line has text, no child name, and unique recordings', () => {
+  const all = allLines();
+  const ids = Object.keys(all);
+  assert.equal(new Set(ids).size, ids.length);
+  for (const id of ids) {
+    assert.ok(all[id].text.length > 5, id);
+    assert.ok(!/mila/i.test(all[id].text), `${id} must not say a name`);
+    assert.ok(!/\{v\}/.test(all[id].text), `${id} filled in`);
+  }
+  assert.ok(variants('en', 'yay1').length >= 3, 'English cheers have several takes');
+  assert.equal(clipId('en', 'borrow_tap', 3, 0), 'en-borrow_tap-3', 'the first take keeps its old file name');
+  assert.equal(clipId('en', 'borrow_tap', 3, 2), 'en-borrow_tap-3-x2');
+  assert.ok(!lineText('en', 'ones_add', null, false, 1).includes('['), 'device text has no acting tags');
+});

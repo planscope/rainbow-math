@@ -94,7 +94,8 @@ async function generate(voiceId, name = '') {
   fs.mkdirSync(AUDIO, { recursive: true });
   const all = allLines();
   const ids = Object.keys(all);
-  const todo = ids.filter((id) => !fs.existsSync(path.join(AUDIO, `${id}.mp3`)));
+  const onlyLang = process.env.LANG_ONLY || null;
+  const todo = ids.filter((id) => !fs.existsSync(path.join(AUDIO, `${id}.mp3`)) && (!onlyLang || all[id].lang === onlyLang));
   const chars = todo.reduce((n, id) => n + all[id].text.length, 0);
   console.log(`${ids.length} clips, ${todo.length} to record (${chars} characters)`);
   let done = 0;
@@ -112,9 +113,11 @@ async function generate(voiceId, name = '') {
   await Promise.all([worker(), worker(), worker()]);
   // remove clips that are no longer used
   for (const f of fs.readdirSync(AUDIO)) {
-    if (f.endsWith('.mp3') && !all[f.slice(0, -4)]) { fs.unlinkSync(path.join(AUDIO, f)); console.log('removed old', f); }
+    if (f.endsWith('.mp3') && f !== 'silence.mp3' && !all[f.slice(0, -4)]) { fs.unlinkSync(path.join(AUDIO, f)); console.log('removed old', f); }
   }
-  const manifest = { voice_id: voiceId, voice_name: name, model: MODEL, generated: new Date().toISOString(), clips: {}, texts: {} };
+  let old = {};
+  try { old = JSON.parse(fs.readFileSync(path.join(AUDIO, 'manifest.json'), 'utf8')); } catch (e) { /* first time */ }
+  const manifest = { voice_id: old.voice_id || voiceId, voice_name: old.voice_name || name, voices: old.voices, model: MODEL, generated: new Date().toISOString(), clips: {}, texts: {} };
   for (const id of ids) {
     if (fs.existsSync(path.join(AUDIO, `${id}.mp3`))) { manifest.clips[id] = `${id}.mp3`; manifest.texts[id] = all[id].text; }
   }
