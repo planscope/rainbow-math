@@ -1,10 +1,12 @@
 // Mila's Rainbow Math Adventure: screens and interaction.
-import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js?v=5';
-import * as M from './model.js?v=5';
-import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=5';
-import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG } from './art.js?v=5';
-import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults } from './store.js?v=5';
-import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=5';
+import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js?v=6';
+import * as M from './model.js?v=6';
+import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=6';
+import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL } from './levels.js?v=6';
+import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=6';
+import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=6';
+import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults } from './store.js?v=6';
+import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=6';
 
 // ---------------------------------------------------------------- setup
 function mount() {
@@ -39,7 +41,10 @@ const T = (k, p) => t(L(), k, p);
 const W = () => STR[L()] || STR.en;
 const reduceMQ = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
 const reduced = () => data.settings.motion === 'reduce' || !!(reduceMQ && reduceMQ.matches);
-const opSym = (op) => (op === '+' ? '+' : '−');
+const opSym = (op) => (op === '+' ? '+' : op === '\u00d7' ? '\u00d7' : '\u2212');
+const opWord = (op) => (op === '+' ? W().plusWord : op === '\u00d7' ? W().timesWord : W().minusWord);
+const isMul = () => !!play && play.p.op === '\u00d7';
+const validProblem = (p) => !!p && (p.op === '\u00d7' ? isValidMul(p) : isValidProblem(p));
 const rand = (n) => Math.floor(Math.random() * n);
 
 // ---------------------------------------------------------------- DOM helpers
@@ -85,7 +90,7 @@ function render() {
   const focusKey = document.activeElement && root.contains(document.activeElement) ? document.activeElement.getAttribute('data-k') : null;
   root.setAttribute('lang', L());
   applyMotion();
-  if (play && play.bubbleKey) play.bubble = play.bubbleKey(); // follows language changes
+  if (screen === 'play' && play && play.bubbleKey && data.active) play.bubble = play.bubbleKey(); // follows language changes
   let view;
   switch (screen) {
     case 'choose': view = viewChoose(); break;
@@ -93,6 +98,8 @@ function render() {
     case 'break': view = viewBreak(); break;
     case 'celebrate': view = viewCelebrate(); break;
     case 'island': view = viewIsland(); break;
+    case 'path': view = viewPathMap(); break;
+    case 'levelup': view = viewLevelUp(); break;
     case 'bye': view = viewBye(); break;
     case 'parent': view = viewParent(); break;
     default: view = viewWelcome();
@@ -202,7 +209,7 @@ function viewWelcome() {
       s
         ? button(T('keepGoing', { n: Math.min(s.index + 1, s.length), total: s.length }), resumeSession, { cls: 'primary big', ic: 'next', k: 'go' })
         : button(T('letsGo'), startFlow, { cls: 'primary big', ic: 'next', k: 'go' }),
-      s ? button(T('newAdventure'), () => { data.active = null; save(data); startFlow(); }, { cls: 'big', k: 'new' }) : null,
+      s ? button(T('newAdventure'), () => { data.active = null; play = null; save(data); startFlow(); }, { cls: 'big', k: 'new' }) : null,
       button(T('myIsland'), () => go('island'), { cls: 'big', ic: 'island', k: 'island' })),
     h('div', { class: 'rm-foot' }, parentHold()));
 }
@@ -219,15 +226,174 @@ function viewChoose() {
   return h('main', { class: 'rm-screen rm-choose' },
     h('div', { class: 'rm-row-top' }, button(T('back'), () => go('welcome'), { cls: 'soft small', ic: 'back', k: 'back' }), langButton()),
     h('div', { class: 'rm-choose-bubble' }, bubbleEl({ mood: 'happy', text: T('chooseTitle') })),
-    h('div', { class: 'rm-adv-grid' },
+    pathCard(),
+    h('h3', { class: 'rm-h3' }, T('practiceTitle')),
+    h('div', { class: 'rm-adv-grid four' },
       card('add', T('addTitle'), T('addPlace'), '+', 'add'),
-      card('sub', T('subTitle'), T('subPlace'), '−', 'sub'),
-      card('mix', T('mixTitle'), T('mixPlace'), '±', 'mix')));
+      card('sub', T('subTitle'), T('subPlace'), '\u2212', 'sub'),
+      card('mix', T('mixTitle'), T('mixPlace'), '\u00b1', 'mix'),
+      card('mul', T('mulTitle'), T('mulPlace'), '\u00d7', 'mul')));
+}
+
+function starsRow(have, goal) {
+  return h('span', { class: 'rm-stars', role: 'img', 'aria-label': T('pathStars', { s: have, g: goal }) },
+    Array.from({ length: goal }, (_, i) => h('span', { class: i < have ? 'on' : '', html: icon('star') })));
+}
+
+function pathCard() {
+  const path = data.progress.path;
+  const lv = levelInfo(path.level);
+  return h('div', { class: 'rm-path-card' },
+    h('button', { type: 'button', class: 'rm-path-main', 'data-k': 'adv-path', onclick: () => { unlockAudio(); sfx.tap(); startSession('path'); } },
+      h('span', { class: 'rm-path-badge' }, String(path.level)),
+      h('span', { class: 'rm-path-text' },
+        h('span', { class: 'rm-adv-title' }, T('pathTitle')),
+        h('span', { class: 'rm-path-name' }, T('pathLevel', { n: path.level, name: T(`lv${path.level}`) })),
+        starsRow(path.stars, lv.goal)),
+      h('span', { class: 'rm-path-go', html: icon('next') })),
+    button(T('pathSee'), () => go('path'), { cls: 'small soft', ic: 'island', k: 'see-path' }));
+}
+
+function levelChip() {
+  const path = data.progress.path;
+  const lv = levelInfo(path.level);
+  const pct = Math.round((Math.min(path.stars, lv.goal) / lv.goal) * 100);
+  return h('div', { class: `rm-level-chip ${play && play.starEarned ? 'bump' : ''}`, role: 'img', 'aria-label': `${T('levelChip', { n: path.level })}: ${T('pathStars', { s: path.stars, g: lv.goal })}` },
+    h('b', null, T('levelChip', { n: path.level })),
+    h('span', { class: 'rm-level-bar' }, h('span', { style: `width:${pct}%` })),
+    h('span', { class: 'rm-level-n' }, h('span', { html: icon('star') }), `${path.stars}/${lv.goal}`));
+}
+
+// ---------------------------------------------------------------- level path map & level up
+function viewPathMap() {
+  const path = data.progress.path;
+  return h('main', { class: 'rm-screen rm-pathmap' },
+    h('div', { class: 'rm-row-top' }, button(T('back'), () => go('choose'), { cls: 'soft small', ic: 'back', k: 'back' }), langButton()),
+    h('h2', { class: 'rm-h2' }, T('pathMapTitle')),
+    h('ol', { class: 'rm-stones' }, LEVELS.map((lv) => {
+      const state = lv.n < path.level ? 'done' : lv.n === path.level ? 'here' : 'locked';
+      return h('li', { class: `rm-stone ${state}` },
+        h('span', { class: 'rm-stone-n' }, state === 'done' ? h('span', { html: icon('star') }) : String(lv.n)),
+        h('span', { class: 'rm-stone-t' },
+          h('b', null, T(`lv${lv.n}`)),
+          h('span', null, state === 'done' ? T('pathDone') : state === 'here' ? T('pathHere') : T('pathLocked'))),
+        state === 'here' ? h('span', { class: 'rm-stone-lumi', html: lumiSVG('happy') }) : null,
+        state === 'here' ? starsRow(path.stars, lv.goal) : null);
+    })),
+    path.level >= MAX_PATH_LEVEL ? h('p', { class: 'rm-text' }, T('pathTop')) : null,
+    h('div', { class: 'rm-actions' }, button(T('pathPlay'), () => startSession('path'), { cls: 'primary big', ic: 'next', k: 'path-play' })));
+}
+
+function viewLevelUp() {
+  const n = (data.active && data.active.levelUp) || data.progress.path.level;
+  const conf = reduced() ? null : h('div', { class: 'rm-confetti', 'aria-hidden': 'true' },
+    Array.from({ length: 28 }, (_, i) => h('span', { style: `--i:${i};--x:${(i * 37) % 100}` })));
+  const say = `${T('levelUpTitle', { n })} ${T(`lv${n}`)}. ${T(`lvNew${n}`)}`;
+  return h('main', { class: 'rm-screen rm-celebrate rm-levelup' },
+    conf,
+    h('div', { class: 'rm-lumi big', html: lumiSVG('cheer') }),
+    h('div', { class: 'rm-levelup-badge' }, String(n)),
+    h('h2', { class: 'rm-h2' }, T('levelUpTitle', { n })),
+    h('p', { class: 'rm-big-text' }, T(`lv${n}`)),
+    h('p', { class: 'rm-text' }, T(`lvNew${n}`)),
+    h('div', { class: 'rm-actions' },
+      button(null, () => readAloud(say), { cls: 'icon soft', ic: 'read', aria: T('read'), k: 'read' }),
+      button(T('levelUpGo'), afterLevelUp, { cls: 'primary big', ic: 'next', k: 'levelup-go' })));
+}
+
+// ---------------------------------------------------------------- multiplication: equal groups
+function mulCard() {
+  const c = data.active.current;
+  const p = play.p;
+  const solved = play.status === 'solved';
+  const k = play.mulCounted;
+  const terms = [];
+  for (let i = 0; i < p.a; i++) {
+    if (i) terms.push(h('span', { class: 'rm-mul-plus' }, ' + '));
+    terms.push(h('span', { class: i < k ? 'on' : '' }, String(p.b)));
+  }
+  const shown = solved ? String(p.answer) : (play.entryStale ? '' : play.entry);
+  return h('div', { class: `rm-card rm-problem rm-mul ${play.drawing ? 'drawing' : ''}` },
+    c.story != null ? h('p', { class: 'rm-story' }, storyText(L(), p, c.story)) : null,
+    h('p', { class: 'rm-eq', 'aria-label': T('whatIs', { a: p.a, b: p.b, opw: opWord(p.op) }) },
+      h('span', { class: 'num-a' }, String(p.a)), ' \u00d7 ', h('span', { class: 'num-b' }, String(p.b)), ' = ',
+      h('span', { class: solved ? 'num-ans' : 'num-q' }, solved ? String(p.answer) : '?')),
+    h('p', { class: 'rm-mul-words' }, T(p.style === 'rows' ? 'mulRowsOf' : 'mulGroupsOf', { a: p.a, b: p.b })),
+    h('p', { class: 'rm-mul-add', 'aria-hidden': 'true' }, terms),
+    h('div', { class: `rm-mul-ans ${play.entryStale ? 'stale' : ''} ${solved ? 'solved' : ''}` }, shown || '\u00a0'),
+    h('canvas', { class: 'rm-ink', 'aria-hidden': 'true' }),
+    play.drawing ? h('div', { class: 'rm-ink-bar' },
+      button(T('undo'), undoStroke, { cls: 'small soft', ic: 'undo', k: 'ink-undo', disabled: !play.strokes.length }),
+      button(T('eraseAll'), eraseInk, { cls: 'small soft', ic: 'eraser', k: 'ink-erase', disabled: !play.strokes.length })) : null);
+}
+
+function groupsPanel() {
+  const p = play.p;
+  const k = play.mulCounted;
+  const guided = play.status === 'guided';
+  const rows = p.style === 'rows';
+  const groups = Array.from({ length: p.a }, (_, i) => {
+    const lit = i < k;
+    const gems = Array.from({ length: p.b }, () => h('span', { class: 'rm-gem' }));
+    return h('button', {
+      type: 'button',
+      class: `rm-group ${rows ? 'row' : ''} ${lit ? 'lit' : ''}`,
+      style: `--c:${RAINBOW[i % RAINBOW.length]}`,
+      'data-k': `grp-${i}`,
+      'aria-label': `${i + 1}: ${p.b}`,
+      onclick: () => tapGroup(),
+    },
+    h('span', { class: 'rm-gems' }, gems),
+    h('span', { class: 'rm-group-n' }, lit ? String((i + 1) * p.b) : ''));
+  });
+  const hint = k >= p.a && !guided ? T('mulCounted', { n: p.answer }) : T(rows ? 'mulTapRows' : 'mulTapGroups', { b: p.b });
+  return h('div', { class: 'rm-card rm-blocks rm-groups-panel' },
+    h('p', { class: 'rm-mat-line' }, hint),
+    h('div', { class: `rm-groups ${rows ? 'rows' : ''}` }, groups),
+    !guided && play.status !== 'solved' && k > 0
+      ? h('div', { class: 'rm-mat-actions' }, button(T('mulRecount'), () => { play.mulCounted = 0; sfx.tap(); update(); }, { cls: 'small soft', ic: 'reset', k: 'grp-reset' }))
+      : null);
+}
+
+function tapGroup() {
+  if (play.status === 'guided') { guidedWait(); return; }
+  if (play.status === 'solved') { sfx.tap(); return; }
+  if (play.mulCounted >= play.p.a) { sfx.tap(); return; }
+  play.mulCounted++;
+  play.countedGroups = true;
+  data.active.current.blocksUsed = true;
+  sfx.pop();
+  update();
+}
+
+function submitMulEntry() {
+  const n = parseEntry(play.entryStale ? '' : play.entry);
+  if (n === null) { toast(T('blankEntry')); sfx.soft(); return; }
+  const p = play.p;
+  const c = data.active.current;
+  const res = analyzeMul(p, n);
+  if (res.correct) { solve(); return; }
+  c.wrongs++;
+  save(data);
+  sfx.soft();
+  if (c.wrongs >= 2) { startGuided(T('wrong2')); return; }
+  play.entryStale = true;
+  const leadPick = rand(3);
+  setBubble(() => ({
+    mood: 'think',
+    lead: T('wrong1', { pick: leadPick }),
+    text: T(res.kind, { a: p.a, b: p.b }),
+    buttons: [
+      { label: T('tryAgain'), onClick: tryAgain, primary: true, k: 'try' },
+      { label: T('helpSteps'), onClick: startGuided, ic: 'help', k: 'steps' },
+    ],
+  }));
+  update();
 }
 
 function startFlow() {
   const pr = data.settings.practice;
-  if (pr === 'add' || pr === 'sub' || pr === 'mix') startSession(pr);
+  if (['path', 'add', 'sub', 'mix', 'mul'].includes(pr)) startSession(pr);
   else go('choose');
 }
 
@@ -255,7 +421,8 @@ function resumeSession() {
   const s = data.active;
   if (!s) return startFlow();
   if (s.index >= s.length) return finishSession();
-  if (!s.current || !s.current.p || !isValidProblem(s.current.p)) newProblem();
+  if (s.levelUp) { go('levelup'); return; }
+  if (!s.current || !s.current.p || !validProblem(s.current.p)) newProblem();
   else initPlay();
   go('play');
 }
@@ -266,12 +433,30 @@ function totalAttempts() {
 
 function newProblem() {
   const s = data.active;
-  const skill = pickSkill(data, s.mode, s);
+  let skill, level;
+  if (s.mode === 'path') {
+    if (s.repeatSkill) { skill = s.repeatSkill; level = s.repeatLevel || 1; }
+    else {
+      [skill, level] = pickFromLevel(data.progress.path.level, {
+        regroupOn: data.settings.regroup !== 'off',
+        multOn: data.settings.mult !== false,
+        lastOp: s.lastOp,
+      });
+    }
+    if (s.ease) level = Math.max(1, level - 1);
+  } else if (s.mode === 'mul') {
+    skill = 'M';
+    level = data.progress.skills.M.level;
+  } else {
+    skill = pickSkill(data, s.mode, s);
+    level = data.progress.skills[skill].level;
+  }
   const st = data.progress.skills[skill];
-  const p = generateProblem(skill, st.level, Math.random, s.used);
+  const p = skill === 'M' ? generateMul(level, Math.random, s.used) : generateProblem(skill, level, Math.random, s.used);
   let msg = null;
   let blocks = false;
-  if (st.attempts === 0 && !BASE_SKILL[skill]) { msg = 'introFirst'; blocks = true; }
+  if (skill === 'M') { if (st.attempts === 0) msg = 'newSkillMul'; }
+  else if (st.attempts === 0 && !BASE_SKILL[skill]) { msg = 'introFirst'; blocks = true; }
   else if (st.attempts === 0 && BASE_SKILL[skill]) { msg = skill === 'C' ? 'newSkillAdd' : 'newSkillSub'; blocks = true; }
   else if (s.note === 'support') { msg = 'supportNext'; blocks = true; }
   else if (s.note === 'similar') msg = 'similarNext';
@@ -281,6 +466,7 @@ function newProblem() {
   s.used.push(p.key);
   s.lastOp = p.op;
   s.repeatSkill = null;
+  s.repeatLevel = null;
   s.ease = false;
   s.note = null;
   save(data);
@@ -291,7 +477,9 @@ function initPlay() {
   const c = data.active.current;
   play = {
     p: c.p,
-    model: M.makeModel(c.p),
+    model: c.p.op === '\u00d7' ? null : M.makeModel(c.p),
+    mulCounted: c.solved && c.p.op === '\u00d7' ? c.p.a : 0,
+    countedGroups: false,
     showBlocks: !!c.showBlocks,
     counting: false,
     entry: c.solved ? String(c.p.answer) : '',
@@ -324,7 +512,7 @@ const answerCells = (n) => ({ tens: n >= 10 ? String(tensOf(n)) : '', ones: Stri
 
 // The final answer is typed into the Tens and Ones boxes, like on paper.
 function usingCells() {
-  if (!play) return false;
+  if (!play || isMul()) return false; // multiplication answers go in one box
   if (play.status === 'ask') return true;
   const st = curStep();
   return play.status === 'guided' && !!st && st.kind === 'write';
@@ -380,11 +568,12 @@ function goHome() {
 // ---------------------------------------------------------------- play view
 function viewPlay() {
   const s = data.active;
-  return h('main', { class: `rm-screen rm-play ${play.showBlocks ? 'with-blocks' : 'no-blocks'}` },
+  const mul = isMul();
+  return h('main', { class: `rm-screen rm-play ${play.showBlocks || mul ? 'with-blocks' : 'no-blocks'} ${mul ? 'is-mul' : ''}` },
     topBar(s),
     h('section', { class: 'rm-a-bubble' }, bubbleEl(play.bubble)),
-    h('section', { class: 'rm-a-problem' }, problemCard()),
-    play.showBlocks ? h('section', { class: 'rm-a-blocks' }, matPanel()) : null,
+    h('section', { class: 'rm-a-problem' }, mul ? mulCard() : problemCard()),
+    play.showBlocks || mul ? h('section', { class: 'rm-a-blocks' }, mul ? groupsPanel() : matPanel()) : null,
     h('section', { class: 'rm-a-pad' }, padEl()),
     h('nav', { class: 'rm-a-tools' }, toolsEl()));
 }
@@ -401,6 +590,7 @@ function topBar(s) {
     h('div', { class: 'rm-dots', role: 'img', 'aria-label': T('problemOf', { i: Math.min(s.index + 1, s.length), n: s.length }) }, dots),
     h('div', { class: `rm-pieces ${play.bump ? 'bump' : ''}`, role: 'img', 'aria-label': T('pieces', { n }) },
       h('span', { html: pieceSVG(n) }), h('b', null, String(n))),
+    s.mode === 'path' ? levelChip() : null,
     soundButton());
 }
 
@@ -410,7 +600,7 @@ function problemCard() {
   const solved = play.status === 'solved';
   return h('div', { class: `rm-card rm-problem ${play.drawing ? 'drawing' : ''}` },
     c.story != null ? h('p', { class: 'rm-story' }, storyText(L(), p, c.story)) : null,
-    h('p', { class: 'rm-eq', 'aria-label': T('whatIs', { a: p.a, b: p.b, opw: p.op === '+' ? W().plusWord : W().minusWord }) },
+    h('p', { class: 'rm-eq', 'aria-label': T('whatIs', { a: p.a, b: p.b, opw: opWord(p.op) }) },
       h('span', { class: 'num-a' }, String(p.a)), ` ${opSym(p.op)} `, h('span', { class: 'num-b' }, String(p.b)), ' = ',
       h('span', { class: solved ? 'num-ans' : 'num-q' }, solved ? String(p.answer) : '?')),
     writtenEl(),
@@ -501,6 +691,7 @@ function padEl() {
   const disabled = solved || (guided && (!st || (st.kind !== 'ask' && st.kind !== 'write')));
   let label = T('answerLabel');
   if (guided && st && st.kind === 'ask') label = `${st.params.x} + ${st.params.y} = ?`;
+  else if (isMul()) label = `${play.p.a} \u00d7 ${play.p.b} = ?`;
   const cellsOn = usingCells();
   let shown = play.entry;
   let tip = null;
@@ -534,7 +725,7 @@ function toolsEl() {
   const st = play.status;
   return [
     button(T('help'), startGuided, { ic: 'help', k: 't-help', disabled: st !== 'ask', cls: 'tool' }),
-    button(play.showBlocks ? T('hideBlocks') : T('blocks'), toggleBlocks, { ic: 'blocks', k: 't-blocks', disabled: st === 'guided', cls: 'tool' }),
+    button(play.showBlocks ? T('hideBlocks') : T('blocks'), toggleBlocks, { ic: 'blocks', k: 't-blocks', disabled: st === 'guided' || isMul(), cls: 'tool' }),
     button(play.drawing ? T('drawDone') : T('draw'), toggleDraw, { ic: 'pencil', k: 't-draw', cls: `tool ${play.drawing ? 'on' : ''}`, pressed: play.drawing }),
     button(T('read'), readProblem, { ic: 'read', k: 't-read', cls: 'tool' }),
     button(T('takeBreak'), () => go('break'), { ic: 'rest', k: 't-break', cls: 'tool' }),
@@ -545,7 +736,7 @@ function readProblem() {
   const c = data.active.current, p = play.p;
   const parts = [];
   if (c.story != null) parts.push(storyText(L(), p, c.story));
-  parts.push(T('whatIs', { a: p.a, b: p.b, opw: p.op === '+' ? W().plusWord : W().minusWord }));
+  parts.push(T('whatIs', { a: p.a, b: p.b, opw: opWord(p.op) }));
   readAloud(parts.join(' '));
 }
 
@@ -572,7 +763,7 @@ function press(d) {
     update();
     return;
   }
-  if (play.status === 'ask') {
+  if (play.status === 'ask' && !isMul()) {
     if (play.splitting) return;
     const col = phaseCell();
     if (play.staleCell === col || play.entryStale) { play.cells[col] = ''; play.staleCell = null; play.entryStale = false; }
@@ -600,7 +791,7 @@ function del() {
   if (play.status === 'solved') return;
   const gs = play.status === 'guided' ? curStep() : null;
   if (gs && gs.kind === 'write') { play.cells[gs.cell] = ''; update(); return; }
-  if (play.status === 'ask') {
+  if (play.status === 'ask' && !isMul()) {
     if (play.splitting) return;
     const col = phaseCell();
     play.cells[col] = play.staleCell === col ? '' : play.cells[col].slice(0, -1);
@@ -625,6 +816,7 @@ function submit() {
     if (g === null) { toast(T('blankEntry')); sfx.soft(); return; }
     return submitGuided(g);
   }
+  if (play.status === 'ask' && isMul()) return submitMulEntry();
   if (play.status === 'ask') return submitColumn();
   const n = usingCells() ? cellsValue() : parseEntry(play.entryStale ? '' : play.entry);
   if (n === 'needOnes') {
@@ -669,7 +861,7 @@ function submit() {
 
 function tryAgain() {
   play.entry = '';
-  if (play.status === 'ask') {
+  if (play.status === 'ask' && !isMul()) {
     play.cells[phaseCell()] = '';
     play.staleCell = null;
     play.entryStale = false;
@@ -839,6 +1031,16 @@ function startGuided(lead) {
   if (!play || play.status === 'solved' || play.status === 'guided') return;
   const c = data.active.current;
   c.helped = true;
+  if (isMul()) {
+    save(data);
+    play.entry = '';
+    play.entryStale = false;
+    play.status = 'guided';
+    play.mulCounted = 0;
+    play.guided = { steps: buildMulSteps(play.p), i: 0, wrongs: 0, startTrades: 0, lead: typeof lead === 'string' ? lead : null };
+    enterStep();
+    return;
+  }
   c.showBlocks = true;
   c.blocksUsed = true;
   save(data);
@@ -857,7 +1059,7 @@ function stepBubble() {
   const g = play.guided;
   const st = curStep();
   // paper-method texts talk about the written digits, so they keep plain numbers
-  const params = st.key.startsWith('w_') ? { ...st.params } : words(st.params);
+  const params = st.key.startsWith('w_') || st.key.startsWith('m_') ? { ...st.params } : words(st.params);
   if (st.key === 'w_split') params.ow = W().ones(st.params.o);
   let lead = g.lead;
   let text = T(st.key, params);
@@ -875,7 +1077,8 @@ function stepBubble() {
 
 function enterStep() {
   const st = curStep();
-  play.guided.startTrades = play.model.trades;
+  play.guided.startTrades = play.model ? play.model.trades : 0;
+  if (st.count != null) play.mulCounted = st.count;
   play.guided.wrongs = 0;
   play.guided.synced = false;
   play.focusCol = st.focus || null;
@@ -964,14 +1167,19 @@ function solve() {
     }
     s.results.push({ skill: p.skill, key: p.key, independent });
     const note = recordResult(data, p.skill, independent);
-    if (c.helped) { s.repeatSkill = p.skill; s.note = 'similar'; }
+    if (c.helped) { s.repeatSkill = p.skill; s.repeatLevel = p.level; s.note = 'similar'; }
+    if (s.mode === 'path') {
+      const r = recordPath(data.progress.path, independent);
+      if (independent) play.starEarned = true;
+      if (r.leveledUp) { s.levelUp = r.level; s.repeatSkill = null; s.note = null; }
+    }
     if (note.eased) {
       s.note = 'support';
       s.ease = true;
       if (BASE_SKILL[p.skill] && data.progress.skills[p.skill].level === 1) s.repeatSkill = BASE_SKILL[p.skill];
     }
-    if (note.levelUp && !c.helped) s.note = 'harder';
-    if (note.unlocked && (s.mode === 'mix' || (s.mode === 'add' && note.unlocked === 'C') || (s.mode === 'sub' && note.unlocked === 'D'))) {
+    if (note.levelUp && !c.helped && s.mode !== 'path') s.note = 'harder';
+    if (s.mode !== 'path' && note.unlocked && (s.mode === 'mix' || (s.mode === 'add' && note.unlocked === 'C') || (s.mode === 'sub' && note.unlocked === 'D'))) {
       s.repeatSkill = note.unlocked;
       s.note = null;
     }
@@ -979,7 +1187,8 @@ function solve() {
   }
   const independent = c.independent;
   const pickN = rand(4);
-  const praiseKey = play.tradedEver ? (p.op === '+' ? 'p_tradedAdd' : 'p_tradedSub')
+  if (isMul()) play.mulCounted = p.a;
+  const praiseKey = isMul() ? (play.countedGroups ? 'p_groups' : null) : play.tradedEver ? (p.op === '+' ? 'p_tradedAdd' : 'p_tradedSub')
     : play.countedEver ? 'p_counted'
       : c.wrongs > 0 && !c.helped ? 'p_fixed'
         : p.regroup ? 'p_onesCareful'
@@ -989,6 +1198,7 @@ function solve() {
   setTimeout(() => sfx.reward(), 450);
   update();
   play.bump = false;
+  play.starEarned = false;
   burst();
 }
 
@@ -999,7 +1209,7 @@ function solvedBubble(info) {
   if (!info) return { mood: 'cheer', text: `${p.a} ${opSym(p.op)} ${p.b} = ${p.answer}`, buttons: [nextBtn] };
   const eq = `${p.a} ${opSym(p.op)} ${p.b} = ${p.answer}.`;
   if (info.wasGuided) {
-    return { mood: 'cheer', lead: T('g_done', { n: p.answer }), text: `${T('rightTeam')} ${info.praiseKey ? T(info.praiseKey) : ''}`.trim(), buttons: [nextBtn] };
+    return { mood: 'cheer', lead: p.op === '\u00d7' ? T('m_so', { a: p.a, b: p.b, n: p.answer }) : T('g_done', { n: p.answer }), text: `${T('rightTeam')} ${info.praiseKey ? T(info.praiseKey) : ''}`.trim(), buttons: [nextBtn] };
   }
   return {
     mood: 'cheer',
@@ -1026,6 +1236,16 @@ function goNext() {
   play.leaving = true;
   stopSpeaking();
   s.index++;
+  save(data);
+  if (s.levelUp) { go('levelup'); return; }
+  if (s.index >= s.length) finishSession();
+  else { newProblem(); go('play'); }
+}
+
+function afterLevelUp() {
+  const s = data.active;
+  if (!s) { go('welcome'); return; }
+  s.levelUp = null;
   save(data);
   if (s.index >= s.length) finishSession();
   else { newProblem(); go('play'); }
@@ -1437,7 +1657,8 @@ function viewCelebrate() {
     h('div', { class: 'rm-chips' },
       c.own ? h('span', { class: 'rm-chip' }, h('span', { html: icon('star') }), T('celOwn', { n: c.own })) : null,
       c.team ? h('span', { class: 'rm-chip team' }, h('span', { html: lumiSVG('happy') }), T('celTeam', { n: c.team })) : null,
-      h('span', { class: 'rm-chip' }, h('span', { html: pieceSVG(2) }), T('celPieces', { n: c.earned }))),
+      h('span', { class: 'rm-chip' }, h('span', { html: pieceSVG(2) }), T('celPieces', { n: c.earned })),
+      c.mode === 'path' ? h('span', { class: 'rm-chip' }, h('span', { html: icon('star') }), T('celLevel', { n: data.progress.path.level, s: data.progress.path.stars, g: levelInfo(data.progress.path.level).goal })) : null),
     c.friend
       ? h('div', { class: 'rm-friend-card new' },
         h('div', { class: 'rm-friend-art', html: friendSVG(c.friend) }),
@@ -1500,7 +1721,15 @@ function viewParent() {
       h('h2', { class: 'rm-h2' }, T('p_title')),
       button(T('p_close'), () => go(parentReturn === 'parent' ? 'welcome' : parentReturn), { cls: 'soft small', ic: 'close', k: 'p-close' })),
     h('section', { class: 'rm-card rm-p-sec' },
-      seg(T('p_practice'), st.practice, [['choose', T('p_choose')], ['add', T('p_add')], ['sub', T('p_sub')], ['mix', T('p_mix')]], (v) => { st.practice = v; }),
+      seg(T('p_practice'), st.practice, [['choose', T('p_choose')], ['path', T('p_path_opt')], ['add', T('p_add')], ['sub', T('p_sub')], ['mix', T('p_mix')], ['mul', T('p_mul_opt')]], (v) => { st.practice = v; }),
+      seg(T('p_path'), data.progress.path.level, LEVELS.map((lv) => [lv.n, String(lv.n)]), (v) => {
+        const path = data.progress.path;
+        path.level = v;
+        path.stars = 0;
+        path.best = Math.max(path.best || 1, v);
+      }),
+      h('p', { class: 'rm-small' }, `${T('pathLevel', { n: data.progress.path.level, name: T(`lv${data.progress.path.level}`) })}. ${T('p_pathNote')}`),
+      seg(T('p_mult'), st.mult !== false, [[true, T('p_on')], [false, T('p_off')]], (v) => { st.mult = v; }),
       seg(T('p_regroup'), st.regroup, [['off', T('p_reg_off')], ['auto', T('p_reg_auto')], ['now', T('p_reg_now')]], (v) => { st.regroup = v; }),
       h('p', { class: 'rm-small' }, T('p_regNote')),
       seg(T('p_length'), st.sessionLength, [[3, '3'], [5, '5'], [8, '8'], [10, '10']], (v) => { st.sessionLength = v; }),
@@ -1514,7 +1743,7 @@ function viewParent() {
       h('div', { class: 'rm-table-wrap' },
         h('table', { class: 'rm-table' },
           h('thead', null, h('tr', null, [T('p_skill'), T('p_level'), T('p_own'), T('p_withHelp'), T('p_status')].map((x) => h('th', { scope: 'col' }, x)))),
-          h('tbody', null, ['A', 'B', 'C', 'D'].map((k) => h('tr', null,
+          h('tbody', null, ['A', 'B', 'C', 'D', 'M'].map((k) => h('tr', null,
             h('th', { scope: 'row' }, T(`skill_${k}`)),
             h('td', null, `${sk[k].level} / 3`),
             h('td', null, String(sk[k].independent)),
@@ -1590,5 +1819,5 @@ document.addEventListener('keydown', onKey);
 onVoicesChanged(() => { if (screen === 'parent') update(); });
 if (reduceMQ && reduceMQ.addEventListener) reduceMQ.addEventListener('change', applyMotion);
 document.addEventListener('pointerdown', () => unlockAudio(), { once: true });
-if (data.active && data.active.current && isValidProblem(data.active.current.p)) initPlay();
+if (data.active && data.active.current && validProblem(data.active.current.p)) initPlay();
 render();

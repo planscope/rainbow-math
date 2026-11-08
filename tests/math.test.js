@@ -154,7 +154,7 @@ test('both languages have every key and every placeholder', () => {
   for (const k of Object.keys(en)) {
     assert.ok(k in es, `Spanish missing ${k}`);
     if (typeof en[k] === 'string') {
-      const ph = (s) => (s.match(/\{\w+\}/g) || []).sort().join();
+      const ph = (s) => [...new Set(s.match(/\{\w+\}/g) || [])].sort().join();
       assert.equal(ph(es[k]), ph(en[k]), `placeholders differ in ${k}`);
     }
     if (Array.isArray(en[k])) assert.ok(Array.isArray(es[k]) && es[k].length > 0, `array ${k}`);
@@ -177,4 +177,57 @@ test('no discouraging words in child-facing text', () => {
     const vals = Array.isArray(v) ? v : typeof v === 'string' ? [v] : [];
     for (const s of vals) assert.ok(!bad.test(s), `${l}.${k}: ${s}`);
   }
+});
+
+// ---------------------------------------------------------------- level path & multiplication
+import { generateMul, isValidMul, buildMulSteps, analyzeMul } from '../js/mult.js';
+import { LEVELS, pickFromLevel, recordPath, MAX_PATH_LEVEL } from '../js/levels.js';
+
+test('multiplication problems stay small and friendly', () => {
+  const rng = mulberry32(9);
+  for (const lvl of [1, 2, 3]) for (let i = 0; i < 2000; i++) {
+    const p = generateMul(lvl, rng);
+    assert.ok(isValidMul(p), p.key);
+    if (lvl === 1) { assert.ok(p.a <= 3); assert.ok([2, 5, 10].includes(p.b)); }
+    assert.equal(p.style, lvl === 3 ? 'rows' : 'groups');
+  }
+});
+
+test('multiplication help adds one group at a time', () => {
+  const st = buildMulSteps({ a: 3, b: 4, answer: 12 });
+  assert.deepEqual(st.map((x) => x.expect ?? null), [null, 8, 12]);
+  assert.ok(st.at(-1).final);
+  assert.deepEqual(st.map((x) => x.count), [1, 2, 3]);
+  assert.equal(analyzeMul({ a: 3, b: 4, answer: 12 }, 7).kind, 'm_added');
+  assert.equal(analyzeMul({ a: 3, b: 4, answer: 12 }, 11).kind, 'm_count_hint');
+});
+
+test('the level path climbs with stars and mixes skills', () => {
+  const path = { level: 1, stars: 0, best: 1 };
+  recordPath(path, false);
+  assert.equal(path.stars, 0, 'help never removes or adds stars');
+  for (let i = 0; i < LEVELS[0].goal - 1; i++) recordPath(path, true);
+  assert.equal(path.level, 1);
+  const r = recordPath(path, true);
+  assert.ok(r.leveledUp);
+  assert.equal(path.level, 2);
+  assert.equal(path.stars, 0);
+  const rng = mulberry32(3);
+  for (const lv of LEVELS) {
+    const seen = new Set();
+    for (let i = 0; i < 300; i++) {
+      const [sk, d] = pickFromLevel(lv.n, { rng });
+      assert.ok(['A', 'B', 'C', 'D', 'M'].includes(sk));
+      assert.ok(d >= 1 && d <= 3);
+      seen.add(sk);
+    }
+    if (lv.n >= 2) assert.ok(seen.size >= 2, `level ${lv.n} is mixed`);
+  }
+  for (let i = 0; i < 300; i++) {
+    assert.ok(!['C', 'D'].includes(pickFromLevel(6, { rng, regroupOn: false })[0]));
+    assert.notEqual(pickFromLevel(7, { rng, multOn: false })[0], 'M');
+  }
+  const top = { level: MAX_PATH_LEVEL, stars: 0 };
+  for (let i = 0; i < 30; i++) recordPath(top, true);
+  assert.equal(top.level, MAX_PATH_LEVEL);
 });

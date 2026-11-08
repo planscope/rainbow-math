@@ -11,6 +11,8 @@ and subtraction by seeing and moving tens and ones. English and Spanish.
 | `css/app.css` | All styles, scoped under `.rm`, so it can sit on top of a Webflow page. |
 | `js/math.js` | Problem generation, answer checking, guided steps. Pure logic, no AI. |
 | `js/model.js` | The tens-and-ones blocks model (combine, trade, take away). |
+| `js/levels.js` | The 10-level path: which skills each level mixes and how many stars it takes to climb. |
+| `js/mult.js` | First multiplication: equal groups and rows, with step-by-step help. |
 | `js/app.js` | Screens: welcome, choose adventure, problems, help, break, celebration, island, grown-ups. |
 | `js/i18n.js` | Every word in English and Spanish, short stories, island friends. |
 | `js/art.js` | Original artwork drawn as SVG: Lumi the rainbow dragon, 12 friends, the island, icons. |

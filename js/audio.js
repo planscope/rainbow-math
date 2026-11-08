@@ -100,6 +100,7 @@ function speakable(text, lang) {
   return text
     .replace(/\s*−\s*/g, es ? ' menos ' : ' minus ')
     .replace(/(\d)\s*-\s*(\d)/g, es ? '$1 menos $2' : '$1 minus $2')
+    .replace(/\s*×\s*/g, es ? ' por ' : ' times ')
     .replace(/\s*\+\s*/g, es ? ' más ' : ' plus ')
     .replace(/\s*=\s*/g, es ? ' es igual a ' : ' equals ')
     .replace(/→/g, ', ')
