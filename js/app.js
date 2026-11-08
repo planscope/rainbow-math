@@ -655,7 +655,7 @@ function solve() {
     : play.countedEver ? 'p_counted'
       : c.wrongs > 0 && !c.helped ? 'p_fixed'
         : p.regroup ? 'p_onesCareful'
-          : c.blocksUsed ? 'p_blocks' : null;
+          : play.movedBlocks ? 'p_blocks' : null;
   setBubble(() => solvedBubble({ wasGuided, independent, pickN, praiseKey }));
   sfx.correct();
   setTimeout(() => sfx.reward(), 450);
@@ -732,6 +732,7 @@ function act(fn) {
     const was = before.get(x.id);
     if (was !== x.state) play.fresh.set(x.id, x.state === 'gone' ? 'gone' : 'in');
   }
+  play.movedBlocks = true;
   if (m.trades > tr) { play.tradedEver = true; sfx.trade(); } else sfx.pop();
   data.active.current.blocksUsed = true;
   if (play.status === 'guided') {
