@@ -83,3 +83,14 @@ node tools/eleven.mjs generate jBpfuIE2acCO8z3wKNLl Gigi
 ```
 
 `node tools/preview-lines.mjs` joins a few sentences into `samples/` to listen to.
+
+## Players, level check and prizes
+
+- Several children can play on one device. Each picks their name and makes a 4-number
+  code; progress is saved separately per player (localStorage, this device only). The
+  code is stored as a SHA-256 fingerprint and only keeps classmates' progress apart.
+  Mila's progress from before players existed becomes her player automatically.
+- New players start with a short level check (about 4-7 problems, no hints) that
+  places them on the 10-level path. Grown-ups can repeat it.
+- Grown-ups can add real-life prizes per child (e.g. "Go to Target" at 100 rainbow
+  pieces). Pieces only go up, so a prize is never lost once earned.

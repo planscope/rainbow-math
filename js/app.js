@@ -1,14 +1,14 @@
 // Mila's Rainbow Math Adventure: screens and interaction.
-import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js?v=10';
-import * as M from './model.js?v=10';
-import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=10';
-import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL } from './levels.js?v=10';
-import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=10';
-import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=10';
-import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults } from './store.js?v=10';
-import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking as stopDeviceSpeech, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=10';
-import { playLine, stopClips, preloadLines } from './voice.js?v=10';
-import { lineText } from './voicelines.js?v=10';
+import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js?v=11';
+import * as M from './model.js?v=11';
+import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=11';
+import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL } from './levels.js?v=11';
+import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=11';
+import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=11';
+import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults, loadPlayers, savePlayers, addPlayer, removePlayer, pinHash } from './store.js?v=11';
+import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking as stopDeviceSpeech, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=11';
+import { playLine, stopClips, preloadLines } from './voice.js?v=11';
+import { lineText } from './voicelines.js?v=11';
 const stopSpeaking = () => { stopDeviceSpeech(); stopClips(); };
 
 // ---------------------------------------------------------------- setup
@@ -25,12 +25,24 @@ function mount() {
 }
 
 const root = mount();
-let data = load();
-data.visits = (data.visits || 0) + 1;
-save(data);
+// Who is playing: each child has their own saved progress on this device.
+let players = loadPlayers();
+let player = null;
+let data = guestData();
 setSound(data.settings.sound);
 
-let screen = 'welcome';
+function guestData() {
+  // before anyone logs in: use the language of whoever played last
+  let lang = 'es';
+  if (players.last) { const d = load(players.last); lang = d.settings.lang || lang; }
+  const g = load(null);
+  g.settings.lang = lang;
+  return g;
+}
+
+let screen = 'who';
+let pin = { target: null, mode: 'enter', entry: '', first: '', msg: '', tries: 0, busy: false };
+let draft = { name: '', friend: 'fox' };
 let play = null;        // live state of the current problem
 let celebrate = null;   // results of the finished adventure
 let parentReturn = 'welcome';
@@ -40,7 +52,7 @@ let toastTimer = null;
 
 const L = () => data.settings.lang;
 const speak = (text, lang, opts) => speakRaw(text, lang, (data.settings.voice || {})[lang] || '', opts);
-const T = (k, p) => t(L(), k, p);
+const T = (k, p) => t(L(), k, { name: player ? player.name : '', ...p });
 const W = () => STR[L()] || STR.en;
 const reduceMQ = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
 const reduced = () => data.settings.motion === 'reduce' || !!(reduceMQ && reduceMQ.matches);
@@ -92,6 +104,7 @@ function applyMotion() {
 function render() {
   const focusKey = document.activeElement && root.contains(document.activeElement) ? document.activeElement.getAttribute('data-k') : null;
   root.setAttribute('lang', L());
+  root.setAttribute('data-screen', screen);
   applyMotion();
   if (screen === 'play' && play && play.bubbleKey && data.active) play.bubble = play.bubbleKey(); // follows language changes
   computeCoach();
@@ -104,6 +117,12 @@ function render() {
     case 'island': view = viewIsland(); break;
     case 'path': view = viewPathMap(); break;
     case 'levelup': view = viewLevelUp(); break;
+    case 'who': view = viewWho(); break;
+    case 'pin': view = viewPin(); break;
+    case 'newplayer': view = viewNewPlayer(); break;
+    case 'placeIntro': view = viewPlaceIntro(); break;
+    case 'placeDone': view = viewPlaceDone(); break;
+    case 'prize': view = viewPrize(); break;
     case 'bye': view = viewBye(); break;
     case 'parent': view = viewParent(); break;
     default: view = viewWelcome();
@@ -127,7 +146,7 @@ function render() {
 // ---------------------------------------------------------------- guide friend
 // One of Mila's island friends sits next to the place to tap, with "Step 1"
 // and a short instruction, and says it in a cartoon voice.
-const coachOn = () => data.settings.coach !== false;
+const coachOn = () => data.settings.coach !== false && !(data.active && data.active.mode === 'placement');
 const coachTalks = () => coachOn() && data.settings.coachVoice !== false && data.settings.sound;
 const guideFriend = () => (data.rewards.friends && data.rewards.friends[0]) || 'fox';
 
@@ -339,7 +358,271 @@ function viewWelcome() {
         : button(T('letsGo'), startFlow, { cls: 'primary big', ic: 'next', k: 'go' }),
       s ? button(T('newAdventure'), () => { data.active = null; play = null; save(data); startFlow(); }, { cls: 'big', k: 'new' }) : null,
       button(T('myIsland'), () => go('island'), { cls: 'big', ic: 'island', k: 'island' })),
+    prizeStrip(),
+    h('div', { class: 'rm-foot' },
+      button(T('switchPlayer'), switchPlayer, { cls: 'soft small', ic: 'back', k: 'switch' }),
+      parentHold()));
+}
+
+// ---------------------------------------------------------------- players: who's playing, secret code
+function viewWho() {
+  return h('main', { class: 'rm-screen rm-who' },
+    h('div', { class: 'rm-corner' }, langButton()),
+    h('h1', { class: 'rm-title' }, T('appName')),
+    rainbowBar(),
+    h('div', { class: 'rm-welcome-bubble' }, bubbleEl({ mood: 'happy', text: T('whoTitle') })),
+    h('div', { class: 'rm-players' },
+      players.players.map((pl) => h('button', { type: 'button', class: 'rm-player', 'data-k': `pl-${pl.id}`, onclick: () => { unlockAudio(); sfx.tap(); pickPlayer(pl); } },
+        h('span', { class: 'rm-player-art', html: friendSVG(pl.friend || 'fox') }),
+        h('span', { class: 'rm-player-name' }, pl.name))),
+      h('button', { type: 'button', class: 'rm-player add', 'data-k': 'pl-new', onclick: () => { unlockAudio(); draft = { name: '', friend: 'fox' }; go('newplayer'); } },
+        h('span', { class: 'rm-player-plus' }, '+'),
+        h('span', { class: 'rm-player-name' }, T('newPlayer')))),
     h('div', { class: 'rm-foot' }, parentHold()));
+}
+
+function pickPlayer(pl) {
+  pin = { target: pl, mode: pl.pin ? 'enter' : 'create', entry: '', first: '', msg: '', tries: 0, busy: false };
+  go('pin');
+}
+
+function viewPin() {
+  const pl = pin.target;
+  if (!pl) return viewWho();
+  const title = pin.mode === 'enter' ? T('pinHello', { who: pl.name }) : pin.mode === 'create' ? T('pinCreate') : T('pinConfirm');
+  const key = (d) => h('button', { type: 'button', class: 'rm-btn rm-key', 'data-k': `pin-${d}`, onclick: () => { unlockAudio(); pinPress(String(d)); } }, String(d));
+  return h('main', { class: 'rm-screen rm-pin' },
+    h('div', { class: 'rm-row-top' }, button(T('back'), () => go('who'), { cls: 'soft small', ic: 'back', k: 'back' }), langButton()),
+    h('div', { class: 'rm-pin-art', html: friendSVG(pl.friend || 'fox') }),
+    h('h2', { class: 'rm-h2' }, pl.name),
+    h('p', { class: 'rm-big-text' }, title),
+    h('div', { class: `rm-pin-dots ${pin.msg && pin.mode === 'enter' ? 'shake' : ''}`, role: 'img', 'aria-label': `${pin.entry.length} / 4` },
+      [0, 1, 2, 3].map((i) => h('span', { class: i < pin.entry.length ? 'on' : '' }))),
+    h('p', { class: 'rm-pin-msg', role: 'status' }, pin.msg || '\u00a0'),
+    h('div', { class: 'rm-keys rm-pin-keys' },
+      [1, 2, 3, 4, 5, 6, 7, 8, 9].map(key),
+      button(null, () => { pin.entry = pin.entry.slice(0, -1); update(); }, { cls: 'rm-key soft', ic: 'del', aria: T('del'), k: 'pin-del' }),
+      key(0),
+      h('span')));
+}
+
+async function pinPress(d) {
+  if (pin.busy || pin.entry.length >= 4) return;
+  pin.entry += d;
+  pin.msg = '';
+  sfx.tap();
+  update();
+  if (pin.entry.length < 4) return;
+  pin.busy = true;
+  const pl = pin.target;
+  const entered = pin.entry;
+  await new Promise((r) => setTimeout(r, 180));
+  if (pin.mode === 'enter') {
+    if (await pinHash(pl.id, entered) === pl.pin) { pin.busy = false; login(pl); return; }
+    pin.tries++;
+    pin.msg = pin.tries >= 5 ? T('pinAskGrownUp') : T('pinWrong');
+    sfx.soft();
+  } else if (pin.mode === 'create') {
+    pin.first = entered;
+    pin.mode = 'confirm';
+  } else if (entered === pin.first) {
+    pl.pin = await pinHash(pl.id, entered);
+    savePlayers(players);
+    pin.busy = false;
+    login(pl);
+    return;
+  } else {
+    pin.mode = 'create';
+    pin.first = '';
+    pin.msg = T('pinMismatch');
+    sfx.soft();
+  }
+  pin.entry = '';
+  pin.busy = false;
+  update();
+}
+
+function login(pl) {
+  player = players.players.find((x) => x.id === pl.id) || pl;
+  data = load(player.id);
+  data.visits = (data.visits || 0) + 1;
+  save(data);
+  players.last = player.id;
+  savePlayers(players);
+  setSound(data.settings.sound);
+  play = null;
+  celebrate = null;
+  if (data.active && data.active.current && validProblem(data.active.current.p)) initPlay();
+  sfx.reward();
+  if (!data.progress.placed) { go('placeIntro'); sayLine('place_start'); return; }
+  go('welcome');
+  sayLine('hello');
+}
+
+function switchPlayer() {
+  stopSpeaking();
+  if (player) save(data);
+  player = null;
+  play = null;
+  celebrate = null;
+  data = guestData();
+  go('who');
+}
+
+function viewNewPlayer() {
+  const ok = draft.name.trim().length > 0;
+  const input = h('input', {
+    type: 'text', class: 'rm-input', maxlength: '14', autocomplete: 'off', autocapitalize: 'words', spellcheck: 'false',
+    value: draft.name, 'aria-label': T('newName'), 'data-k': 'name-input',
+    oninput: (e) => {
+      draft.name = e.target.value.replace(/[<>]/g, '').slice(0, 14);
+      const nb = root.querySelector('[data-k="new-next"]');
+      if (nb) nb.disabled = !draft.name.trim();
+    },
+  });
+  return h('main', { class: 'rm-screen rm-newplayer' },
+    h('div', { class: 'rm-row-top' }, button(T('back'), () => go('who'), { cls: 'soft small', ic: 'back', k: 'back' }), langButton()),
+    h('h2', { class: 'rm-h2' }, T('newTitle')),
+    h('label', { class: 'rm-field-l' }, T('newName')),
+    input,
+    h('div', { class: 'rm-field-l' }, T('newFriend')),
+    h('div', { class: 'rm-friend-pick' }, CREATURE_ORDER.map((f) => h('button', {
+      type: 'button', class: 'rm-friend-opt', 'aria-pressed': String(draft.friend === f), 'aria-label': CREATURE_NAMES[f][L()], 'data-k': `fr-${f}`,
+      onclick: () => { draft.friend = f; sfx.tap(); update(); },
+    }, h('span', { html: friendSVG(f) })))),
+    h('div', { class: 'rm-actions' }, button(T('newNext'), createPlayer, { cls: 'primary big', ic: 'next', k: 'new-next', disabled: !ok })));
+}
+
+function createPlayer() {
+  const name = draft.name.trim().slice(0, 14);
+  if (!name) return;
+  const id = addPlayer(players, { name, friend: draft.friend, lang: L() });
+  players = loadPlayers();
+  pickPlayer(players.players.find((x) => x.id === id));
+}
+
+// ---------------------------------------------------------------- first "what do you know" check
+// About 6 problems. It starts in the middle of the path and goes up after a right answer
+// and down after a miss (like looking for a page in a book), then picks the level.
+const PROBE = { 1: ['A', 1], 2: ['B', 1], 3: ['B', 2], 4: ['C', 1], 5: ['D', 1], 6: ['D', 2], 7: ['M', 1], 8: ['M', 2], 9: ['M', 3], 10: ['D', 3] };
+
+function viewPlaceIntro() {
+  return h('main', { class: 'rm-screen rm-celebrate rm-place' },
+    h('div', { class: 'rm-lumi big', html: lumiSVG('happy') }),
+    h('h2', { class: 'rm-h2' }, T('placeTitle')),
+    h('p', { class: 'rm-big-text' }, T('placeText')),
+    h('div', { class: 'rm-actions' },
+      button(null, () => readAloud(`${T('placeTitle')} ${T('placeText')}`), { cls: 'icon soft', ic: 'read', aria: T('read'), k: 'read' }),
+      button(T('placeGo'), () => startSession('placement'), { cls: 'primary big', ic: 'next', k: 'place-go' })));
+}
+
+function placementRecord(ok) {
+  const s = data.active;
+  const pl = s.place;
+  if (ok) pl.pass = Math.max(pl.pass, pl.probe); else pl.fail = Math.min(pl.fail, pl.probe);
+  pl.done++;
+  const top = data.settings.mult === false ? 6 : 10;
+  const next = Math.floor((pl.pass + Math.min(pl.fail, top + 1)) / 2);
+  if (pl.done >= 7 || next <= pl.pass || next >= Math.min(pl.fail, top + 1)) pl.finished = true;
+  else pl.probe = next;
+  save(data);
+}
+
+// A miss during the check: no hints, show the answer kindly and move on.
+function placementMiss() {
+  const s = data.active, c = s.current, p = play.p;
+  play.status = 'solved';
+  play.solvedAt = Date.now();
+  play.entry = String(p.answer);
+  play.entryStale = false;
+  play.staleCell = null;
+  play.cells = answerCells(p.answer);
+  play.focusCol = null;
+  if (isMul()) play.mulCounted = p.a;
+  c.solved = true;
+  c.awarded = true;
+  placementRecord(false);
+  sfx.soft();
+  setBubble(() => ({ mood: 'happy', text: T('placeNext', { n: p.answer }), buttons: [{ label: T('next'), onClick: goNext, primary: true, ic: 'next', k: 'b-next' }] }));
+  update();
+  sayLine('place_next');
+}
+
+function finishPlacement() {
+  const s = data.active;
+  const lvl = Math.max(1, s.place.pass);
+  data.progress.path = { level: lvl, stars: 0, best: Math.max(lvl, data.progress.path.best || 1) };
+  data.progress.placed = true;
+  data.active = null;
+  play = null;
+  save(data);
+  go('placeDone');
+  sayLine('place_done');
+}
+
+function viewPlaceDone() {
+  const n = data.progress.path.level;
+  const conf = reduced() ? null : h('div', { class: 'rm-confetti', 'aria-hidden': 'true' },
+    Array.from({ length: 28 }, (_, i) => h('span', { style: `--i:${i};--x:${(i * 37) % 100}` })));
+  return h('main', { class: 'rm-screen rm-celebrate rm-levelup' },
+    conf,
+    h('div', { class: 'rm-lumi big', html: lumiSVG('cheer') }),
+    h('div', { class: 'rm-levelup-badge' }, String(n)),
+    h('h2', { class: 'rm-h2' }, T('placeDoneTitle', { n })),
+    h('p', { class: 'rm-big-text' }, T(`lv${n}`)),
+    h('div', { class: 'rm-actions' }, button(T('placeDoneGo'), () => startSession('path'), { cls: 'primary big', ic: 'next', k: 'place-play' })));
+}
+
+// ---------------------------------------------------------------- real-life prizes set by a grown-up
+const PRIZE_ICONS = ['\u{1F6CD}\uFE0F', '\u{1F366}', '\u{1F9F8}', '\u{1F3A0}', '\u{1F3AC}', '\u{1F355}', '\u{1F4DA}', '\u{1F3A8}', '\u{1F381}', '\u{1F3D6}\uFE0F'];
+const nextPrize = () => (data.prizes || []).filter((x) => !x.won).sort((a, b) => a.goal - b.goal)[0] || null;
+
+function prizeStrip() {
+  const pz = nextPrize();
+  if (!pz) return null;
+  const have = data.rewards.pieces;
+  const pct = Math.min(100, Math.round((have / pz.goal) * 100));
+  return h('div', { class: 'rm-prize-strip', role: 'img', 'aria-label': `${T('prizeNext')}: ${pz.title}. ${T('prizeLeft', { n: Math.max(0, pz.goal - have) })}` },
+    h('span', { class: 'rm-prize-icon' }, pz.icon),
+    h('span', { class: 'rm-prize-text' },
+      h('small', null, T('prizeNext')),
+      h('b', null, pz.title),
+      h('span', { class: 'rm-prize-bar' }, h('span', { style: `width:${pct}%` }))),
+    h('span', { class: 'rm-prize-count' }, h('span', { html: pieceSVG(3) }), `${Math.min(have, pz.goal)}/${pz.goal}`));
+}
+
+function checkPrizes() {
+  const s = data.active;
+  for (const pz of data.prizes || []) {
+    if (!pz.won && data.rewards.pieces >= pz.goal) {
+      pz.won = true;
+      pz.wonAt = new Date().toISOString();
+      if (s) s.prizeWon = pz.id;
+    }
+  }
+}
+
+function viewPrize() {
+  const s = data.active;
+  const pz = (data.prizes || []).find((x) => s && x.id === s.prizeWon) || (data.prizes || []).filter((x) => x.won).slice(-1)[0];
+  const conf = reduced() ? null : h('div', { class: 'rm-confetti', 'aria-hidden': 'true' },
+    Array.from({ length: 34 }, (_, i) => h('span', { style: `--i:${i};--x:${(i * 29) % 100}` })));
+  return h('main', { class: 'rm-screen rm-celebrate rm-prize' },
+    conf,
+    h('div', { class: 'rm-prize-big' }, pz ? pz.icon : '\u{1F381}'),
+    h('h2', { class: 'rm-h2' }, T('prizeTitle')),
+    h('p', { class: 'rm-big-text' }, pz ? pz.title : ''),
+    h('p', { class: 'rm-text' }, T('prizeShow')),
+    h('div', { class: 'rm-actions' }, button(T('prizeOk'), afterPrize, { cls: 'primary big', ic: 'next', k: 'prize-ok' })));
+}
+
+function afterPrize() {
+  const s = data.active;
+  if (s) { s.prizeWon = null; save(data); }
+  if (s && s.levelUp) { go('levelup'); sayLine('levelup'); return; }
+  if (!s) { go('welcome'); return; }
+  if (s.index >= s.length) finishSession();
+  else { newProblem(); go('play'); }
 }
 
 // ---------------------------------------------------------------- choose
@@ -494,6 +777,7 @@ function tapGroup() {
   update();
 }
 
+const s0 = () => data.active || {};
 function submitMulEntry() {
   const n = parseEntry(play.entryStale ? '' : play.entry);
   if (n === null) { toast(T('blankEntry')); sfx.soft(); return; }
@@ -501,6 +785,7 @@ function submitMulEntry() {
   const c = data.active.current;
   const res = analyzeMul(p, n);
   if (res.correct) { solve(); return; }
+  if (s0().mode === 'placement') { placementMiss(); return; }
   c.wrongs++;
   save(data);
   sfx.soft();
@@ -521,6 +806,7 @@ function submitMulEntry() {
 }
 
 function startFlow() {
+  if (!data.progress.placed) { go('placeIntro'); sayLine('place_start'); return; }
   const pr = data.settings.practice;
   if (['path', 'add', 'sub', 'mix', 'mul'].includes(pr)) startSession(pr);
   else go('choose');
@@ -542,6 +828,10 @@ function startSession(mode) {
     current: null,
     finished: false,
   };
+  if (mode === 'placement') {
+    data.active.length = 7;
+    data.active.place = { pass: 0, fail: 11, probe: 4, done: 0, finished: false };
+  }
   newProblem();
   go('play');
 }
@@ -549,8 +839,10 @@ function startSession(mode) {
 function resumeSession() {
   const s = data.active;
   if (!s) return startFlow();
-  if (s.index >= s.length) return finishSession();
+  if (s.prizeWon) { go('prize'); sayLine('prize'); return; }
   if (s.levelUp) { go('levelup'); sayLine('levelup'); return; }
+  if (s.mode === 'placement' && (s.place.finished || s.index >= s.length)) return finishPlacement();
+  if (s.index >= s.length) return finishSession();
   if (!s.current || !s.current.p || !validProblem(s.current.p)) newProblem();
   else initPlay();
   go('play');
@@ -563,7 +855,9 @@ function totalAttempts() {
 function newProblem() {
   const s = data.active;
   let skill, level;
-  if (s.mode === 'path') {
+  if (s.mode === 'placement') {
+    [skill, level] = PROBE[s.place.probe] || ['A', 1];
+  } else if (s.mode === 'path') {
     if (s.repeatSkill) { skill = s.repeatSkill; level = s.repeatLevel || 1; }
     else {
       [skill, level] = pickFromLevel(data.progress.path.level, {
@@ -856,7 +1150,7 @@ function padEl() {
 function toolsEl() {
   const st = play.status;
   return [
-    button(T('help'), startGuided, { ic: 'help', k: 't-help', disabled: st !== 'ask', cls: 'tool' }),
+    button(T('help'), startGuided, { ic: 'help', k: 't-help', disabled: st !== 'ask' || s0().mode === 'placement', cls: 'tool' }),
     button(play.showBlocks ? T('hideBlocks') : T('blocks'), toggleBlocks, { ic: 'blocks', k: 't-blocks', disabled: st === 'guided' || isMul(), cls: 'tool' }),
     button(play.drawing ? T('drawDone') : T('draw'), toggleDraw, { ic: 'pencil', k: 't-draw', cls: `tool ${play.drawing ? 'on' : ''}`, pressed: play.drawing }),
     button(T('read'), readProblem, { ic: 'read', k: 't-read', cls: 'tool' }),
@@ -1120,6 +1414,7 @@ function borrowByTap() {
 }
 
 function columnWrong(col, v, info) {
+  if (data.active.mode === 'placement') { placementMiss(); return; }
   const p = play.p;
   const c = data.active.current;
   c.wrongs++;
@@ -1313,7 +1608,9 @@ function solve() {
       data.rewards.pieces++;
       data.rewards.awarded = [...data.rewards.awarded, key].slice(-80);
       play.bump = true;
+      checkPrizes();
     }
+    if (s.mode === 'placement') placementRecord(independent);
     s.results.push({ skill: p.skill, key: p.key, independent });
     const note = recordResult(data, p.skill, independent);
     if (c.helped) { s.repeatSkill = p.skill; s.repeatLevel = p.level; s.note = 'similar'; }
@@ -1387,6 +1684,12 @@ function goNext() {
   stopSpeaking();
   s.index++;
   save(data);
+  if (s.mode === 'placement') {
+    if (s.place.finished || s.index >= s.length) finishPlacement();
+    else { newProblem(); go('play'); }
+    return;
+  }
+  if (s.prizeWon) { go('prize'); sayLine('prize'); return; }
   if (s.levelUp) { go('levelup'); sayLine('levelup'); return; }
   if (s.index >= s.length) finishSession();
   else { newProblem(); go('play'); }
@@ -1825,7 +2128,7 @@ function viewCelebrate() {
       h('span', { class: 'rm-chip' }, h('span', { html: pieceSVG(2) }), T('celPieces', { n: c.earned })),
       c.mode === 'path' ? h('span', { class: 'rm-chip' }, h('span', { html: icon('star') }), T('celLevel', { n: data.progress.path.level, s: data.progress.path.stars, g: levelInfo(data.progress.path.level).goal })) : null),
     c.friend
-      ? h('div', { class: 'rm-friend-card new' },
+      ? h('div', { class: 'rm-friend-card photocard new' },
         h('div', { class: 'rm-friend-art', html: friendSVG(c.friend) }),
         h('div', null, h('p', { class: 'rm-text' }, T('celFriend')), h('p', { class: 'rm-friend-name' }, CREATURE_NAMES[c.friend][L()])))
       : h('p', { class: 'rm-text' }, T('celAllFriends')),
@@ -1854,7 +2157,7 @@ function viewIsland() {
       rainbows ? h('p', { class: 'rm-text' }, T('islandRainbows', { n: rainbows })) : null),
     h('h3', { class: 'rm-h3' }, T('islandFriends', { n: r.friends.length, total: CREATURE_ORDER.length })),
     r.friends.length
-      ? h('div', { class: 'rm-friends' }, r.friends.map((f) => h('div', { class: 'rm-friend-card' },
+      ? h('div', { class: 'rm-friends' }, r.friends.map((f) => h('div', { class: 'rm-friend-card photocard' },
         h('div', { class: 'rm-friend-art', html: friendSVG(f) }),
         h('p', { class: 'rm-friend-name' }, CREATURE_NAMES[f][L()]))))
       : h('p', { class: 'rm-text' }, T('islandEmpty')));
@@ -1871,7 +2174,61 @@ function seg(label, value, options, onPick) {
       }, text))));
 }
 
+function playersSection() {
+  return h('section', { class: 'rm-card rm-p-sec' },
+    h('h3', { class: 'rm-h3' }, T('p_players')),
+    h('ul', { class: 'rm-plist' }, players.players.map((pl) => h('li', null,
+      h('span', { class: 'rm-plist-art', html: friendSVG(pl.friend || 'fox') }),
+      h('b', null, pl.name),
+      button(T('p_resetPin'), () => { pl.pin = null; savePlayers(players); parentMsg = T('p_pinReset'); update(); }, { cls: 'small soft', k: `pin-reset-${pl.id}`, disabled: !pl.pin }),
+      pdel === pl.id
+        ? h('span', { class: 'rm-confirm-inline' }, h('span', null, T('p_delSure', { who: pl.name })),
+          button(T('p_resetYes'), () => { removePlayer(players, pl.id); players = loadPlayers(); pdel = null; if (player && player.id === pl.id) { player = null; data = guestData(); play = null; } update(); }, { cls: 'small danger', k: `del-yes-${pl.id}` }),
+          button(T('p_resetNo'), () => { pdel = null; update(); }, { cls: 'small soft', k: `del-no-${pl.id}` }))
+        : button(T('p_delPlayer'), () => { pdel = pl.id; update(); }, { cls: 'small soft', k: `del-${pl.id}` })))),
+    h('p', { class: 'rm-small' }, T('p_playersNote')));
+}
+let pdel = null;
+let prizeDraft = { title: '', icon: '\u{1F6CD}\uFE0F', goal: 50 };
+
+function prizesSection() {
+  const list = data.prizes || (data.prizes = []);
+  const have = data.rewards.pieces;
+  const titleIn = h('input', {
+    type: 'text', class: 'rm-input small', maxlength: '30', placeholder: T('p_prizePh'), value: prizeDraft.title, 'data-k': 'prize-title', 'aria-label': T('p_prizeTitle'),
+    oninput: (e) => { prizeDraft.title = e.target.value.replace(/[<>]/g, ''); const b = root.querySelector('[data-k="prize-add"]'); if (b) b.disabled = !prizeDraft.title.trim(); },
+  });
+  return h('section', { class: 'rm-card rm-p-sec' },
+    h('h3', { class: 'rm-h3' }, T('p_prizes')),
+    h('p', { class: 'rm-small' }, `${T('p_prizesNote')} ${T('pieces', { n: have })}.`),
+    list.length ? h('ul', { class: 'rm-plist' }, list.map((pz) => h('li', null,
+      h('span', { class: 'rm-prize-icon' }, pz.icon),
+      h('b', null, `${pz.title} \u00b7 ${pz.goal}`),
+      h('span', { class: 'rm-small' }, pz.given ? T('p_prizeGiven') : pz.won ? T('p_prizeWon') : T('p_prizeLeft', { n: Math.max(0, pz.goal - have) })),
+      pz.won && !pz.given ? button(T('p_prizeGive'), () => { pz.given = true; save(data); update(); }, { cls: 'small', k: `give-${pz.id}` }) : null,
+      button(null, () => { data.prizes = list.filter((x) => x.id !== pz.id); save(data); update(); }, { cls: 'icon soft small', ic: 'close', aria: T('p_delPlayer'), k: `pz-del-${pz.id}` })))) : h('p', { class: 'rm-small' }, T('p_noPrizes')),
+    h('div', { class: 'rm-field' }, h('div', { class: 'rm-field-l' }, T('p_prizeTitle')), titleIn),
+    h('div', { class: 'rm-seg' }, PRIZE_ICONS.map((ic) => h('button', { type: 'button', class: 'rm-seg-b emoji', 'aria-pressed': String(prizeDraft.icon === ic), onclick: () => { prizeDraft.icon = ic; update(); } }, ic))),
+    seg(T('p_prizeGoal'), prizeDraft.goal, [[20, '20'], [50, '50'], [100, '100'], [200, '200'], [300, '300']], (v) => { prizeDraft.goal = v; }),
+    button(T('p_prizeAdd'), () => {
+      const title = prizeDraft.title.trim().slice(0, 30);
+      if (!title) return;
+      list.push({ id: `z${Date.now().toString(36)}`, title, icon: prizeDraft.icon, goal: prizeDraft.goal, won: data.rewards.pieces >= prizeDraft.goal, given: false });
+      prizeDraft = { title: '', icon: prizeDraft.icon, goal: prizeDraft.goal };
+      save(data);
+      update();
+    }, { cls: 'primary', ic: 'star', k: 'prize-add', disabled: !prizeDraft.title.trim() }));
+}
+
 function viewParent() {
+  if (!player) {
+    return h('main', { class: 'rm-screen rm-parent' },
+      h('div', { class: 'rm-row-top' },
+        h('h2', { class: 'rm-h2' }, T('p_title')),
+        button(T('p_close'), () => go('who'), { cls: 'soft small', ic: 'close', k: 'p-close' })),
+      parentMsg ? h('p', { class: 'rm-small ok', role: 'status' }, parentMsg) : null,
+      playersSection());
+  }
   const st = data.settings;
   const sk = data.progress.skills;
   const status = (k) => {
@@ -1883,8 +2240,9 @@ function viewParent() {
   const fmtDate = (iso) => { try { return new Date(iso).toLocaleDateString(L() === 'es' ? 'es-MX' : 'en-US', { month: 'short', day: 'numeric' }); } catch (e) { return iso.slice(0, 10); } };
   return h('main', { class: 'rm-screen rm-parent' },
     h('div', { class: 'rm-row-top' },
-      h('h2', { class: 'rm-h2' }, T('p_title')),
+      h('h2', { class: 'rm-h2' }, `${T('p_title')} \u00b7 ${player.name}`),
       button(T('p_close'), () => go(parentReturn === 'parent' ? 'welcome' : parentReturn), { cls: 'soft small', ic: 'close', k: 'p-close' })),
+    prizesSection(),
     h('section', { class: 'rm-card rm-p-sec' },
       seg(T('p_practice'), st.practice, [['choose', T('p_choose')], ['path', T('p_path_opt')], ['add', T('p_add')], ['sub', T('p_sub')], ['mix', T('p_mix')], ['mul', T('p_mul_opt')]], (v) => { st.practice = v; }),
       seg(T('p_path'), data.progress.path.level, LEVELS.map((lv) => [lv.n, String(lv.n)]), (v) => {
@@ -1895,6 +2253,7 @@ function viewParent() {
       }),
       h('p', { class: 'rm-small' }, `${T('pathLevel', { n: data.progress.path.level, name: T(`lv${data.progress.path.level}`) })}. ${T('p_pathNote')}`),
       seg(T('p_mult'), st.mult !== false, [[true, T('p_on')], [false, T('p_off')]], (v) => { st.mult = v; }),
+      button(T('p_replace'), () => { data.progress.placed = false; save(data); parentMsg = T('p_replaceDone'); update(); }, { cls: 'small soft', ic: 'reset', k: 'replace' }),
       seg(T('p_regroup'), st.regroup, [['off', T('p_reg_off')], ['auto', T('p_reg_auto')], ['now', T('p_reg_now')]], (v) => { st.regroup = v; }),
       h('p', { class: 'rm-small' }, T('p_regNote')),
       seg(T('p_length'), st.sessionLength, [[3, '3'], [5, '5'], [8, '8'], [10, '10']], (v) => { st.sessionLength = v; }),
@@ -1970,6 +2329,8 @@ function resetProgress() {
 
 // ---------------------------------------------------------------- keyboard
 function onKey(e) {
+  if (screen === 'pin' && /^[0-9]$/.test(e.key)) { e.preventDefault(); pinPress(e.key); return; }
+  if (screen === 'pin' && e.key === 'Backspace') { e.preventDefault(); pin.entry = pin.entry.slice(0, -1); update(); return; }
   if (screen !== 'play' || !play) return;
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (/^[0-9]$/.test(e.key)) { e.preventDefault(); press(e.key); }
@@ -1987,5 +2348,4 @@ document.addEventListener('keydown', onKey);
 onVoicesChanged(() => { if (screen === 'parent') update(); });
 if (reduceMQ && reduceMQ.addEventListener) reduceMQ.addEventListener('change', applyMotion);
 document.addEventListener('pointerdown', () => unlockAudio(), { once: true });
-if (data.active && data.active.current && validProblem(data.active.current.p)) initPlay();
 render();

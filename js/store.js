@@ -1,8 +1,13 @@
 // Saved data lives only in this browser (localStorage). Every access is
 // wrapped so the app still works when storage is blocked.
-import { NEXT_SKILL, BASE_SKILL, MAX_LEVEL } from './math.js?v=10';
+import { NEXT_SKILL, BASE_SKILL, MAX_LEVEL } from './math.js?v=11';
 
-const KEY = 'mila-rainbow-math-v1';
+// Each player (Mila, and classmates who play on this device) has their own saved data.
+// Nothing leaves the device: no accounts, no server.
+const OLD_KEY = 'mila-rainbow-math-v1';          // before players existed (Mila only)
+const PLAYERS_KEY = 'rainbow-math-players-v1';
+const playerKey = (id) => `rainbow-math-player-${id}`;
+let currentId = null;
 
 const skillStat = () => ({ level: 1, streak: 0, struggle: 0, attempts: 0, independent: 0, helped: 0 });
 
@@ -27,7 +32,9 @@ export function defaults() {
       skills: { A: skillStat(), B: skillStat(), C: skillStat(), D: skillStat(), M: skillStat() },
       unlocked: { C: false, D: false },
       path: { level: 1, stars: 0, best: 1 }, // the level path
+      placed: false, // finished the first "what do you know" check
     },
+    prizes: [], // real-life prizes a grown-up set: { id, title, icon, goal, won, given }
     rewards: { pieces: 0, friends: [], star: false, awarded: [] },
     sessions: [],
     active: null,
@@ -48,26 +55,77 @@ function merge(base, saved) {
 
 export let storageOK = true;
 
-export function load() {
+function readJSON(key) {
+  try { const raw = window.localStorage.getItem(key); return raw ? JSON.parse(raw) : null; } catch (e) { storageOK = false; return null; }
+}
+function writeJSON(key, value) {
+  try { window.localStorage.setItem(key, JSON.stringify(value)); storageOK = true; } catch (e) { storageOK = false; }
+}
+
+// ---- players
+export function loadPlayers() {
+  let list = readJSON(PLAYERS_KEY);
+  if (!list || !Array.isArray(list.players)) {
+    list = { players: [], last: null };
+    // Mila's progress from before players existed becomes her player.
+    const old = readJSON(OLD_KEY);
+    if (old) {
+      list.players.push({ id: 'mila', name: 'Mila', friend: 'fox', pin: null, created: new Date().toISOString() });
+      old.progress = old.progress || {};
+      old.progress.placed = true; // she already has a level
+      writeJSON(playerKey('mila'), old);
+      writeJSON(`${OLD_KEY}-backup`, old);
+      try { window.localStorage.removeItem(OLD_KEY); } catch (e) { /* ignore */ }
+    }
+    writeJSON(PLAYERS_KEY, list);
+  }
+  return list;
+}
+export const savePlayers = (list) => writeJSON(PLAYERS_KEY, list);
+
+export function addPlayer(list, { name, friend, lang }) {
+  const id = `p${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`;
+  list.players.push({ id, name, friend, pin: null, created: new Date().toISOString() });
+  savePlayers(list);
+  const d = defaults();
+  if (lang) d.settings.lang = lang;
+  writeJSON(playerKey(id), d);
+  return id;
+}
+export function removePlayer(list, id) {
+  list.players = list.players.filter((x) => x.id !== id);
+  if (list.last === id) list.last = null;
+  savePlayers(list);
+  try { window.localStorage.removeItem(playerKey(id)); } catch (e) { /* ignore */ }
+}
+
+// The PIN is kept as a scrambled fingerprint (SHA-256), never as the 4 digits.
+// It only keeps classmates out of each other's progress on a shared device.
+export async function pinHash(id, pin) {
+  const bytes = new TextEncoder().encode(`rainbow-math:${id}:${pin}`);
   try {
-    const raw = window.localStorage.getItem(KEY);
-    // probe writability
-    window.localStorage.setItem(KEY + ':probe', '1');
-    window.localStorage.removeItem(KEY + ':probe');
-    return raw ? merge(defaults(), JSON.parse(raw)) : defaults();
+    const d = await crypto.subtle.digest('SHA-256', bytes);
+    return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('');
   } catch (e) {
-    storageOK = false;
-    return defaults();
+    let x = 0x811c9dc5;
+    for (const b of bytes) { x ^= b; x = Math.imul(x, 0x01000193) >>> 0; }
+    return `f${x.toString(16)}`;
   }
 }
 
-export function save(data) {
+export function load(id) {
+  currentId = id;
   try {
-    window.localStorage.setItem(KEY, JSON.stringify(data));
-    storageOK = true;
-  } catch (e) {
-    storageOK = false;
-  }
+    window.localStorage.setItem(`${PLAYERS_KEY}:probe`, '1');
+    window.localStorage.removeItem(`${PLAYERS_KEY}:probe`);
+  } catch (e) { storageOK = false; }
+  const raw = id ? readJSON(playerKey(id)) : null;
+  return raw ? merge(defaults(), raw) : defaults();
+}
+
+export function save(data) {
+  if (!currentId) return;
+  writeJSON(playerKey(currentId), data);
 }
 
 // ---------------------------------------------------------------- adaptivity

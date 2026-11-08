@@ -2,8 +2,8 @@
 // tools/eleven.mjs). Each line is one whole recording, so it sounds natural.
 // The app never calls ElevenLabs. If a recording is missing it says false and
 // the app uses the device voice instead.
-import { audioCtx, stopSpeaking } from './audio.js?v=10';
-import { clipId } from './voicelines.js?v=10';
+import { audioCtx, stopSpeaking } from './audio.js?v=11';
+import { clipId } from './voicelines.js?v=11';
 
 let manifest = null;
 let manifestTried = false;
@@ -15,7 +15,7 @@ async function loadManifest() {
   if (manifestTried) return manifest;
   manifestTried = true;
   try {
-    const r = await fetch(new URL('../audio/manifest.json?v=10', import.meta.url));
+    const r = await fetch(new URL('../audio/manifest.json?v=11', import.meta.url));
     if (r.ok) manifest = await r.json();
   } catch (e) { /* no recordings: device voice is used */ }
   return manifest;
