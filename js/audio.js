@@ -108,7 +108,7 @@ function speakable(text, lang) {
 }
 
 // Only ever called from a user action (a tap), or right after one.
-export function speak(text, lang, voiceName) {
+export function speak(text, lang, voiceName, opts = {}) {
   if (!canSpeak() || !text) return false;
   try {
     const s = window.speechSynthesis;
@@ -118,8 +118,8 @@ export function speak(text, lang, voiceName) {
     const v = pickVoice(lang, voiceName);
     if (v) { u.voice = v; u.lang = v.lang; }
     // a little slower and a little brighter: friendly, patient, clear
-    u.rate = 0.88;
-    u.pitch = 1.12;
+    u.rate = opts.rate ?? 0.88;
+    u.pitch = opts.pitch ?? 1.12;
     u.volume = 1;
     s.speak(u);
     return true;

@@ -1,12 +1,12 @@
 // Mila's Rainbow Math Adventure: screens and interaction.
-import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js?v=7';
-import * as M from './model.js?v=7';
-import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=7';
-import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL } from './levels.js?v=7';
-import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=7';
-import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=7';
-import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults } from './store.js?v=7';
-import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=7';
+import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js?v=8';
+import * as M from './model.js?v=8';
+import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=8';
+import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL } from './levels.js?v=8';
+import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=8';
+import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=8';
+import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults } from './store.js?v=8';
+import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=8';
 
 // ---------------------------------------------------------------- setup
 function mount() {
@@ -36,7 +36,7 @@ let parentMsg = '';
 let toastTimer = null;
 
 const L = () => data.settings.lang;
-const speak = (text, lang) => speakRaw(text, lang, (data.settings.voice || {})[lang] || '');
+const speak = (text, lang, opts) => speakRaw(text, lang, (data.settings.voice || {})[lang] || '', opts);
 const T = (k, p) => t(L(), k, p);
 const W = () => STR[L()] || STR.en;
 const reduceMQ = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
@@ -91,6 +91,7 @@ function render() {
   root.setAttribute('lang', L());
   applyMotion();
   if (screen === 'play' && play && play.bubbleKey && data.active) play.bubble = play.bubbleKey(); // follows language changes
+  computeCoach();
   let view;
   switch (screen) {
     case 'choose': view = viewChoose(); break;
@@ -104,14 +105,113 @@ function render() {
     case 'parent': view = viewParent(); break;
     default: view = viewWelcome();
   }
-  root.replaceChildren(view, toastEl);
+  const coach = screen === 'play' && play && play.coach ? coachEls() : [];
+  root.replaceChildren(view, toastEl, ...coach);
   if (focusKey) {
     const el = root.querySelector(`[data-k="${focusKey}"]`);
     if (el && !el.disabled) el.focus({ preventScroll: true });
   }
   if (screen === 'play' && play) setupInk();
   if (play) play.fresh = new Map();
+  if (coach.length) {
+    positionCoach();
+    requestAnimationFrame(positionCoach);
+    play.coachShown = play.coach.key;
+    speakCoach();
+  }
 }
+
+// ---------------------------------------------------------------- guide friend
+// One of Mila's island friends sits next to the place to tap, with "Step 1"
+// and a short instruction, and says it in a cartoon voice.
+const coachOn = () => data.settings.coach !== false;
+const coachTalks = () => coachOn() && data.settings.coachVoice !== false && data.settings.sound;
+const guideFriend = () => (data.rewards.friends && data.rewards.friends[0]) || 'fox';
+
+function computeCoach() {
+  if (!play) return;
+  play.coach = null;
+  play.coachFocus = null;
+  if (screen !== 'play' || !coachOn() || play.status === 'solved' || play.splitting || !data.active) return;
+  const p = play.p;
+  let c = null;
+  if (play.status === 'guided') {
+    const st = curStep();
+    if (!st) return;
+    const n = play.guided.i + 1;
+    const said = [play.bubble && play.bubble.lead, play.bubble && play.bubble.text].filter(Boolean).join(' ');
+    if (st.kind === 'carry') c = { target: '[data-k="carry-chip"]', short: T('c_carry_s'), side: 'above' };
+    else if (st.kind === 'borrow') c = { target: '[data-k="borrow-digit"]', short: T('c_borrow_s', { t: tensOf(p.a) }), side: 'above' };
+    else if (st.kind === 'write') c = { target: `[data-k="cell-${st.cell}"]`, short: T('c_write_s'), side: 'below' };
+    else if (st.kind === 'ask') c = { target: '.rm-entry', short: T('c_type_s'), side: 'left' };
+    else c = { target: '[data-k="g-next"]', short: T('c_ok_s'), side: 'below' };
+    Object.assign(c, { n, say: `${T('coachStep', { n })}. ${said}`, key: `g${play.guided.i}` });
+  } else if (isMul()) {
+    const k = play.mulCounted;
+    c = k < p.a
+      ? { n: 1, target: `[data-k="grp-${k}"]`, short: T('c_group_s'), say: T('c_group_v', { n: 1, b: p.b }), side: 'above', key: 'm1' }
+      : { n: 2, target: '.rm-entry', short: T('c_type_s'), say: T('c_mul_type_v', { n: 2 }), side: 'left', key: 'm2' };
+  } else {
+    const info = colInfo();
+    const col = phaseCell();
+    const needBorrow = p.op === '-' && info.borrow;
+    if (col === 'ones' && needBorrow && !info.borrowed) {
+      c = { n: 1, target: '[data-k="borrow-digit"]', short: T('c_borrow_s', { t: info.a10 }), say: T('c_borrow_v', { n: 1, x: info.a1, y: info.b1, t: info.a10 }), side: 'above', key: 'b1', focus: 'ones' };
+    } else if (col === 'ones') {
+      const n = needBorrow ? 2 : 1;
+      c = { n, target: '[data-k="cell-ones"]', short: T('c_box_s', { expr: info.onesExpr }), say: T('c_ones_v', { n, expr: info.onesExpr }), side: 'below', key: `o${n}` };
+    } else {
+      const n = needBorrow ? 3 : 2;
+      c = { n, target: '[data-k="cell-tens"]', short: T('c_box_s', { expr: info.tensExpr }), say: T('c_tens_v', { n, expr: info.tensExpr }), side: 'below', key: `t${n}` };
+    }
+  }
+  play.coach = c;
+  play.coachFocus = c.focus || null;
+}
+
+function coachEls() {
+  const c = play.coach;
+  const fresh = c.key !== play.coachShown;
+  return [
+    h('div', { class: 'rm-tap-ring', 'aria-hidden': 'true' }),
+    h('div', { class: `rm-coach ${fresh ? 'enter' : ''}`, 'aria-hidden': 'true' },
+      h('div', { class: 'rm-coach-pal', html: friendSVG(guideFriend()) }),
+      h('div', { class: 'rm-coach-b' }, h('b', { class: 'rm-coach-n' }, T('coachStep', { n: c.n })), h('span', null, c.short))),
+  ];
+}
+
+function positionCoach() {
+  const el = root.querySelector('.rm-coach');
+  const ring = root.querySelector('.rm-tap-ring');
+  if (!el || !ring || !play || !play.coach) return;
+  const t = root.querySelector(play.coach.target);
+  const r = t ? t.getBoundingClientRect() : null;
+  if (!r || !r.width) { el.style.display = 'none'; ring.style.display = 'none'; return; }
+  el.style.display = '';
+  ring.style.display = '';
+  Object.assign(ring.style, { left: `${r.left - 6}px`, top: `${r.top - 6}px`, width: `${r.width + 12}px`, height: `${r.height + 12}px` });
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const w = el.offsetWidth, hgt = el.offsetHeight;
+  let side = play.coach.side;
+  let left, top;
+  if (side === 'left' && r.left - w - 14 < 8) side = 'below';
+  if (side === 'below' && r.bottom + 12 + hgt > vh - 8) side = 'above';
+  if (side === 'above' && r.top - 12 - hgt < 8) side = 'below';
+  if (side === 'left') { left = r.left - w - 14; top = r.top + r.height / 2 - hgt / 2; }
+  else { left = r.left + r.width / 2 - w / 2; top = side === 'below' ? r.bottom + 12 : r.top - hgt - 12; }
+  left = Math.max(8, Math.min(vw - w - 8, left));
+  top = Math.max(8, Math.min(vh - hgt - 8, top));
+  Object.assign(el.style, { left: `${left}px`, top: `${top}px` });
+  el.dataset.side = side;
+}
+
+function speakCoach() {
+  const c = play && play.coach;
+  if (!c || c.key === play.coachSpoken) return;
+  play.coachSpoken = c.key;
+  if (coachTalks()) speak(c.say, L(), { pitch: 1.6, rate: 1.0 }); // a bright, cartoon voice
+}
+root.addEventListener('scroll', () => { if (screen === 'play') positionCoach(); }, { passive: true });
 const update = render;
 
 function go(next) {
@@ -618,7 +718,7 @@ function writtenEl() {
   const p = play.p, m = play.model;
   const a10 = tensOf(p.a), a1 = onesOf(p.a), b10 = tensOf(p.b), b1 = onesOf(p.b);
   const traded = m.trades > 0;
-  const fc = play.focusCol;
+  const fc = play.focusCol || play.coachFocus;
   let ansT = '', ansO = '', penT = false, penO = false;
   const st = curStep();
   if (play.status === 'solved') {
@@ -1101,7 +1201,7 @@ function enterStep() {
   play.focusCol = st.focus || null;
   if (st.kind === 'write') { play.activeCell = st.cell; play.cells[st.cell] = ''; }
   setBubble(stepBubble);
-  if (data.settings.autoRead) speak([play.bubble.lead, play.bubble.text].filter(Boolean).join(' '), L());
+  if (data.settings.autoRead && !coachTalks()) speak([play.bubble.lead, play.bubble.text].filter(Boolean).join(' '), L());
   update();
 }
 
@@ -1423,7 +1523,7 @@ function setupInk() {
   cv.addEventListener('pointerup', end);
   cv.addEventListener('pointercancel', end);
 }
-window.addEventListener('resize', () => { if (screen === 'play' && play) setupInk(); });
+window.addEventListener('resize', () => { if (screen === 'play' && play) { setupInk(); positionCoach(); } });
 
 function guidedWait() {
   toast(T('g_wait'));
@@ -1768,6 +1868,8 @@ function viewParent() {
       seg(T('p_lang'), st.lang, [['en', 'English'], ['es', 'Español']], (v) => { st.lang = v; }),
       seg(T('p_sound'), st.sound, [[true, T('p_on')], [false, T('p_off')]], (v) => { st.sound = v; setSound(v); }),
       seg(T('p_autoRead'), st.autoRead, [[true, T('p_on')], [false, T('p_off')]], (v) => { st.autoRead = v; }),
+      seg(T('p_coach'), st.coach !== false, [[true, T('p_on')], [false, T('p_off')]], (v) => { st.coach = v; }),
+      seg(T('p_coachVoice'), st.coachVoice !== false, [[true, T('p_on')], [false, T('p_off')]], (v) => { st.coachVoice = v; }),
       voiceField(),
       seg(T('p_motion'), st.motion, [['auto', T('p_motionAuto')], ['reduce', T('p_motionReduce')]], (v) => { st.motion = v; })),
     h('section', { class: 'rm-card rm-p-sec' },

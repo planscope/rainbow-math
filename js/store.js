@@ -1,6 +1,6 @@
 // Saved data lives only in this browser (localStorage). Every access is
 // wrapped so the app still works when storage is blocked.
-import { NEXT_SKILL, BASE_SKILL, MAX_LEVEL } from './math.js?v=7';
+import { NEXT_SKILL, BASE_SKILL, MAX_LEVEL } from './math.js?v=8';
 
 const KEY = 'mila-rainbow-math-v1';
 
@@ -19,6 +19,8 @@ export function defaults() {
       sessionLength: 5,
       voice: { en: '', es: '' }, // chosen read-aloud voice per language ('' = best available)
       mult: true, // multiplication levels on the path
+      coach: true, // a guide friend points at where to tap next
+      coachVoice: true, // ...and says it in a cartoon voice
     },
     progress: {
       skills: { A: skillStat(), B: skillStat(), C: skillStat(), D: skillStat(), M: skillStat() },
