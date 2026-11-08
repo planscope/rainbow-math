@@ -54,44 +54,43 @@ test('wrong-answer feedback only states facts', () => {
   assert.notEqual(analyzeAnswer(r, 7).kind, 'tensRight', 'no "tens are right" when the answer has no tens');
 });
 
-// Walk every guided step on the blocks model and check that pictures,
-// written marks and the numbers Mila is asked for always agree.
+// Walk every guided step on the blocks model and check that the pictures,
+// the written boxes and the numbers Mila is asked for always agree.
 function walk(p) {
   const m = M.makeModel(p);
   assert.equal(M.value(m), p.a, 'model starts at the first number');
   const steps = buildSteps(p);
   assert.ok(steps[steps.length - 1].final);
-  const marks = {};
+  const boxes = { ones: '', tens: '' };
   for (const st of steps) {
-    if (st.kind === 'act') {
-      const before = m.trades;
-      const valBefore = M.value(m);
-      assert.ok(M.applyAction(m, st.act), `${p.key} action ${st.act} possible`);
-      assert.ok(M.actionDone(m, st.act, before));
-      if (st.act.startsWith('trade')) assert.equal(M.value(m), valBefore, 'a trade never changes the amount');
+    const valBefore = M.value(m);
+    if (st.sync) {
+      const did = M.applyAction(m, st.sync);
+      assert.ok(did, `${p.key} ${st.key} sync ${st.sync}`);
+      if (st.sync.startsWith('trade')) {
+        assert.equal(M.value(m), valBefore, 'a trade never changes the amount');
+        assert.equal(st.kind, st.sync === 'tradeUp' ? 'carry' : 'borrow');
+      }
     }
-    if (st.key === 'g_sub_still') {
-      const c = M.counts(m);
-      assert.equal(c.tensIn, st.params.t); assert.equal(c.onesIn, st.params.o); assert.equal(M.value(m), p.a);
+    const c = M.counts(m);
+    if (st.kind === 'ask') assert.equal(st.expect, c.onesIn, `${p.key} ones sum shown in blocks`);
+    if (st.key === 'w_split') { assert.equal(Math.floor(st.params.s / 10), 1); assert.equal(st.params.s, c.onesIn); }
+    if (st.key === 'w_borrow_after') { assert.equal(c.tensIn, st.params.t); assert.equal(c.onesIn, st.params.o); assert.equal(M.value(m), p.a); }
+    if (st.kind === 'write') {
+      assert.ok(st.expect >= 0 && st.expect <= 9, 'one digit per box');
+      assert.equal(st.expect, st.cell === 'ones' ? c.onesIn : c.tensIn, `${p.key} ${st.cell} box matches blocks`);
+      boxes[st.cell] = String(st.expect);
     }
-    if (st.key === 'g_after_trade_up') assert.equal(M.counts(m).onesIn, st.params.o);
-    if (st.kind === 'ask') {
-      const c = M.counts(m);
-      if (st.ask === 'ones') assert.equal(st.expect, c.onesIn, `${p.key} ones`);
-      if (st.ask === 'tens') assert.equal(st.expect, c.tensIn, `${p.key} tens`);
-      if (st.ask === 'total') { assert.equal(st.expect, p.answer); assert.equal(M.value(m), p.answer); assert.equal(st.params.t * 10 + st.params.o, p.answer); }
-    }
-    if (st.mark) Object.assign(marks, st.mark);
   }
-  assert.equal(marks.ones, onesOf(p.answer));
-  assert.equal(marks.tens, tensOf(p.answer));
+  assert.equal(M.value(m), p.answer, `${p.key} blocks end at the answer`);
+  assert.equal(Number(boxes.tens || 0) * 10 + Number(boxes.ones), p.answer, `${p.key} boxes read the answer`);
+  assert.equal(boxes.ones, String(onesOf(p.answer)));
   if (p.op === '+') assert.equal(M.counts(m).onesTray + M.counts(m).tensTray, 0);
   else assert.ok(M.subtractionDone(m));
   assert.equal(m.trades, p.regroup ? 1 : 0, 'exactly one trade when regrouping');
 }
 
 test('guided steps match the blocks for every problem', () => {
-  // all valid two-digit pairs, exhaustively
   let n = 0;
   for (let a = 10; a <= 99; a++) for (let b = 10; b <= 99; b++) {
     if (a + b <= 99) {
@@ -106,20 +105,26 @@ test('guided steps match the blocks for every problem', () => {
   assert.ok(n > 5000);
 });
 
-test('the 42 - 17 example follows the script', () => {
-  const p = { a: 42, b: 17, op: '-', answer: 25, regroup: true };
-  const keys = buildSteps(p).map((s) => s.key);
-  assert.deepEqual(keys, ['g_sub_show', 'g_sub_need_trade', 'g_sub_still', 'g_take_ones', 'g_ask_ones_left', 'g_take_tens', 'g_ask_tens_left', 'g_ask_total']);
-  const still = buildSteps(p)[2].params;
-  assert.deepEqual([still.t, still.o, still.a], [3, 12, 42]);
+test('39 + 12: 9 + 2 = 11, the 1 goes up on top of the 3, then 1 + 3 + 1', () => {
+  const st = buildSteps({ a: 39, b: 12, op: '+', answer: 51, regroup: true });
+  assert.deepEqual(st.map((x) => x.key), ['w_ones_sum', 'w_split', 'w_carry_up', 'w_write_ones', 'w_tens_carry']);
+  assert.equal(st[0].expect, 11);
+  assert.equal(st[2].params.t, 3);
+  assert.equal(st[3].expect, 1);
+  assert.equal(st[4].expect, 5);
 });
 
-test('the 28 + 15 example makes 13 ones then 4 tens 3 ones', () => {
-  const p = { a: 28, b: 15, op: '+', answer: 43, regroup: true };
-  const st = buildSteps(p);
-  assert.equal(st.find((s) => s.ask === 'ones').expect, 13);
-  assert.equal(st.find((s) => s.ask === 'tens').expect, 4);
-  assert.deepEqual(st[st.length - 1].params, { t: 4, o: 3 });
+test('42 - 17: borrow from the 4, 12 - 7 = 5, 3 - 1 = 2', () => {
+  const st = buildSteps({ a: 42, b: 17, op: '-', answer: 25, regroup: true });
+  assert.deepEqual(st.map((x) => x.key), ['w_sub_cant', 'w_borrow', 'w_borrow_after', 'w_sub_ones', 'w_sub_tens']);
+  assert.deepEqual([st[2].params.t, st[2].params.o, st[2].params.a], [3, 12, 42]);
+  assert.equal(st[3].expect, 5);
+  assert.equal(st[4].expect, 2);
+});
+
+test('no regrouping: write the ones, then the tens', () => {
+  assert.deepEqual(buildSteps({ a: 24, b: 24, op: '+', answer: 48 }).map((x) => [x.cell, x.expect]), [['ones', 8], ['tens', 4]]);
+  assert.equal(buildSteps({ a: 45, b: 41, op: '-', answer: 4 }).at(-1).key, 'w_sub_tens_zero');
 });
 
 test('free play: blocks can only take away what the problem asks, and trades only when needed', () => {

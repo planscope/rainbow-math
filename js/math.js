@@ -143,48 +143,50 @@ export function analyzeAnswer(p, ans) {
 }
 
 // ---------------------------------------------------------------------------
-// Guided steps. Each step is one small thing Mila does:
-//   kind 'next' -> she taps "OK" after looking
-//   kind 'act'  -> she moves blocks (act names a model action)
-//   kind 'ask'  -> she types a number (ask: 'ones' | 'tens' | 'total')
-// `mark` writes a pencil digit into the written answer after the step.
+// ---------------------------------------------------------------------------
+// Guided steps follow the paper method, one small thing at a time:
+//   kind 'ask'    -> type a number on the keypad (e.g. 9 + 2 = 11)
+//   kind 'write'  -> write one digit in the Ones or Tens answer box
+//   kind 'carry'  -> tap the yellow 1 and move it up on top of the tens
+//   kind 'borrow' -> tap the top tens digit to borrow 1 ten
+//   kind 'next'   -> look, then tap OK
+// `sync` is the blocks move that happens with the step, so the pictures
+// always show the same thing as the written numbers.
 export function buildSteps(p) {
   const a10 = tensOf(p.a), a1 = onesOf(p.a), b10 = tensOf(p.b), b1 = onesOf(p.b);
   const steps = [];
   if (p.op === '+') {
-    const onesSum = a1 + b1;
-    const carry = onesSum >= 10 ? 1 : 0;
-    const onesLeft = onesSum - 10 * carry;
-    const tensSum = a10 + b10 + carry;
-    if (b1 > 0) steps.push({ kind: 'act', act: 'bringOnes', key: 'g_add_ones', params: { ao: a1, bo: b1 }, focus: 'ones' });
-    else steps.push({ kind: 'next', key: 'g_add_zero_ones', params: { ao: a1 }, focus: 'ones' });
-    steps.push({ kind: 'ask', ask: 'ones', expect: onesSum, key: 'g_ask_ones', focus: 'ones', mark: carry ? null : { ones: onesLeft } });
+    const s = a1 + b1;
+    const carry = s >= 10 ? 1 : 0;
+    const o = s - 10 * carry;
+    const tsum = a10 + b10 + carry;
     if (carry) {
-      steps.push({ kind: 'act', act: 'tradeUp', key: 'g_trade_up', params: { n: onesSum }, focus: 'ones' });
-      steps.push({ kind: 'next', key: 'g_after_trade_up', params: { o: onesLeft }, focus: 'ones', mark: { ones: onesLeft } });
+      steps.push({ kind: 'ask', ask: 'onesSum', expect: s, key: 'w_ones_sum', params: { x: a1, y: b1 }, focus: 'ones', sync: 'bringOnes' });
+      steps.push({ kind: 'next', key: 'w_split', params: { s, o }, focus: 'ones', split: true });
+      steps.push({ kind: 'carry', key: 'w_carry_up', params: { t: a10, s }, focus: 'tens', split: true, sync: 'tradeUp' });
+      steps.push({ kind: 'write', cell: 'ones', expect: o, key: 'w_write_ones', params: { o }, focus: 'ones' });
+      steps.push({ kind: 'write', cell: 'tens', expect: tsum, key: 'w_tens_carry', params: { t: a10, u: b10 }, focus: 'tens', sync: 'bringTens', final: true });
+    } else {
+      steps.push({ kind: 'write', cell: 'ones', expect: o, key: 'w_ones_direct', params: { x: a1, y: b1 }, focus: 'ones', sync: b1 > 0 ? 'bringOnes' : null });
+      steps.push({ kind: 'write', cell: 'tens', expect: tsum, key: 'w_tens', params: { t: a10, u: b10 }, focus: 'tens', sync: 'bringTens', final: true });
     }
-    steps.push({ kind: 'act', act: 'bringTens', key: carry ? 'g_add_tens_carry' : 'g_add_tens', params: { at: a10, bt: b10 }, focus: 'tens' });
-    steps.push({ kind: 'ask', ask: 'tens', expect: tensSum, key: 'g_ask_tens', focus: 'tens', mark: { tens: tensSum } });
-    steps.push({ kind: 'ask', ask: 'total', expect: p.answer, key: 'g_ask_total', params: { t: tensSum, o: onesLeft }, final: true });
   } else {
     const borrow = a1 < b1 ? 1 : 0;
     const tensNow = a10 - borrow;
     const onesNow = a1 + 10 * borrow;
     const onesLeft = onesNow - b1;
     const tensLeft = tensNow - b10;
-    steps.push({ kind: 'next', key: 'g_sub_show', params: { a: p.a, t: a10, o: a1 } });
     if (borrow) {
-      steps.push({ kind: 'act', act: 'tradeDown', key: 'g_sub_need_trade', params: { o: a1, bo: b1 }, focus: 'ones' });
-      steps.push({ kind: 'next', key: 'g_sub_still', params: { t: tensNow, o: onesNow, a: p.a }, borrowShown: true });
-    } else {
-      steps.push({ kind: 'next', key: 'g_sub_enough', params: { o: a1, bo: b1 }, focus: 'ones' });
+      steps.push({ kind: 'next', key: 'w_sub_cant', params: { x: a1, y: b1 }, focus: 'ones' });
+      steps.push({ kind: 'borrow', key: 'w_borrow', params: { t: a10 }, focus: 'tens', sync: 'tradeDown' });
+      steps.push({ kind: 'next', key: 'w_borrow_after', params: { t0: a10, t: tensNow, x: a1, o: onesNow, a: p.a } });
     }
-    if (b1 > 0) steps.push({ kind: 'act', act: 'takeOnes', key: 'g_take_ones', params: { bo: b1 }, focus: 'ones' });
-    else steps.push({ kind: 'next', key: 'g_take_zero_ones', focus: 'ones' });
-    steps.push({ kind: 'ask', ask: 'ones', expect: onesLeft, key: 'g_ask_ones_left', focus: 'ones', mark: { ones: onesLeft } });
-    steps.push({ kind: 'act', act: 'takeTens', key: 'g_take_tens', params: { bt: b10 }, focus: 'tens' });
-    steps.push({ kind: 'ask', ask: 'tens', expect: tensLeft, key: 'g_ask_tens_left', focus: 'tens', mark: { tens: tensLeft } });
-    steps.push({ kind: 'ask', ask: 'total', expect: p.answer, key: 'g_ask_total', params: { t: tensLeft, o: onesLeft }, final: true });
+    steps.push({ kind: 'write', cell: 'ones', expect: onesLeft, key: 'w_sub_ones', params: { x: onesNow, y: b1 }, focus: 'ones', sync: b1 > 0 ? 'takeOnes' : null });
+    if (tensLeft > 0) {
+      steps.push({ kind: 'write', cell: 'tens', expect: tensLeft, key: 'w_sub_tens', params: { x: tensNow, y: b10 }, focus: 'tens', sync: 'takeTens', final: true });
+    } else {
+      steps.push({ kind: 'next', key: 'w_sub_tens_zero', params: { x: tensNow, y: b10 }, focus: 'tens', sync: 'takeTens', final: true });
+    }
   }
   return steps;
 }

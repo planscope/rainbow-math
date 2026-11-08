@@ -486,3 +486,20 @@ button.rm-w-ans:not(:disabled) { cursor: pointer; }
 @media (min-width: 1150px) and (min-height: 800px) {
   .rm .rm-written .rm-w-ans { font-size: 70px; }
 }
+
+/* ---------------------------------------------------------------- v3: paper method */
+/* 11 sitting over the ones column: the yellow 1 is the ten, the other 1 is the one */
+.rm-split { display: inline-flex; align-items: center; gap: 2px; font-size: 30px; font-weight: 700; line-height: 1; }
+.rm-split-t { display: inline-grid; place-items: center; min-width: 40px; height: 40px; border-radius: 999px; background: #ffe066; border: 3px solid #f08c00; color: #7a3e00; font: inherit; font-size: 26px; padding: 0; }
+.rm-split-o { color: var(--a); padding: 0 4px; }
+button.rm-split-t.tap { min-width: 48px; height: 48px; cursor: pointer; box-shadow: 0 0 0 6px rgba(255, 192, 30, .35); animation: rm-glow 1.6s ease-in-out infinite; }
+.rm-carry-target {
+  width: 48px; height: 48px; border-radius: 999px; border: 3px dashed #f08c00; background: #fff9db;
+  color: #f08c00; font: inherit; font-size: 22px; font-weight: 700; padding: 0; cursor: pointer;
+}
+.rm .rm-borrow-btn {
+  font-size: 60px; font-weight: 700; line-height: 1.05; color: var(--a); background: #fff9db;
+  border: 3px dashed #f08c00; border-radius: 14px; padding: 0; cursor: pointer;
+  box-shadow: 0 0 0 6px rgba(255, 192, 30, .3); animation: rm-glow 1.6s ease-in-out infinite;
+}
+@keyframes rm-glow { 50% { box-shadow: 0 0 0 10px rgba(255, 192, 30, .15); } }

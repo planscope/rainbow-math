@@ -1,10 +1,10 @@
 // Mila's Rainbow Math Adventure: screens and interaction.
-import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js?v=3';
-import * as M from './model.js?v=3';
-import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=3';
-import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG } from './art.js?v=3';
-import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults } from './store.js?v=3';
-import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=3';
+import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js?v=4';
+import * as M from './model.js?v=4';
+import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=4';
+import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG } from './art.js?v=4';
+import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults } from './store.js?v=4';
+import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=4';
 
 // ---------------------------------------------------------------- setup
 function mount() {
@@ -323,7 +323,7 @@ function usingCells() {
   if (!play) return false;
   if (play.status === 'ask') return true;
   const st = curStep();
-  return play.status === 'guided' && !!st && st.kind === 'ask' && st.ask === 'total';
+  return play.status === 'guided' && !!st && st.kind === 'write';
 }
 function clearCells() {
   play.cells = { tens: '', ones: '' };
@@ -340,6 +340,8 @@ function cellsValue() {
 }
 function selectCell(col) {
   if (!usingCells() || play.status === 'solved') return;
+  const st = curStep();
+  if (play.status === 'guided' && st && st.cell !== col) { guidedWait(); return; }
   if (play.entryStale) clearCells();
   play.activeCell = col;
   sfx.tap();
@@ -440,7 +442,22 @@ function writtenEl() {
     markT = h('span', { class: 'rm-w-markwrap' }, h('span', { class: 'rm-borrow-t' }, String(a10 - 1)), arrow('to-ones'));
     markO = h('span', { class: `rm-carry wide ${fresh ? 'fly-right' : ''}` }, String(a1 + 10));
   }
+  const gst = play.status === 'guided' ? curStep() : null;
+  if (gst && gst.split && !traded) {
+    // 9 + 2 = 11: the 1 ten (yellow) and the 1 one, sitting over the ones column
+    const tensDigit = gst.kind === 'carry'
+      ? h('button', { type: 'button', class: 'rm-split-t tap', 'data-k': 'carry-chip', 'aria-label': T('act_carry'), onclick: doCarry }, '1')
+      : h('b', { class: 'rm-split-t' }, '1');
+    markO = h('span', { class: 'rm-split' }, tensDigit, h('b', { class: 'rm-split-o' }, String(gst.params.s % 10)));
+    if (gst.kind === 'carry') {
+      markT = h('button', { type: 'button', class: 'rm-carry-target', 'data-k': 'carry-target', 'aria-label': T('act_carry'), onclick: doCarry }, '?');
+    }
+  }
   const cell = (txt, col, extra = '') => h('span', { class: `rm-w-c ${col} ${fc === col ? 'focus' : ''} ${extra}` }, txt);
+  const borrowNow = gst && gst.kind === 'borrow' && !traded;
+  const topTens = borrowNow
+    ? h('button', { type: 'button', class: 'rm-w-c tens num-a rm-borrow-btn', 'data-k': 'borrow-digit', 'aria-label': T('act_borrow'), onclick: doBorrow }, String(a10))
+    : cell(String(a10), 'tens', `num-a ${traded && p.op === '-' ? 'struck' : ''}`);
   const cellsOn = usingCells() && play.status !== 'solved';
   const box = (txt, col, pen) => h('button', {
     type: 'button',
@@ -450,10 +467,10 @@ function writtenEl() {
     disabled: !cellsOn,
     onclick: () => selectCell(col),
   }, txt);
-  return h('div', { class: `rm-written ${traded ? 'traded' : ''}` },
+  return h('div', { class: `rm-written ${traded || (gst && gst.split) ? 'traded' : ''}` },
     h('span', { class: 'rm-w-op' }), cell(T('tensCol'), 'tens', 'rm-w-h'), cell(T('onesCol'), 'ones', 'rm-w-h'),
     h('span', { class: 'rm-w-op' }), cell(markT, 'tens', 'rm-w-mark'), cell(markO, 'ones', 'rm-w-mark'),
-    h('span', { class: 'rm-w-op' }), cell(String(a10), 'tens', `num-a ${traded && p.op === '-' ? 'struck' : ''}`), cell(String(a1), 'ones', `num-a ${traded && p.op === '-' ? 'struck' : ''}`),
+    h('span', { class: 'rm-w-op' }), topTens, cell(String(a1), 'ones', `num-a ${traded && p.op === '-' ? 'struck' : ''}`),
     h('span', { class: 'rm-w-op' }, opSym(p.op)), cell(String(b10), 'tens', 'num-b'), cell(String(b1), 'ones', 'num-b'),
     h('span', { class: 'rm-w-line' }),
     h('span', { class: 'rm-w-op' }), box(ansT, 'tens', penT), box(ansO, 'ones', penO));
@@ -464,9 +481,9 @@ function padEl() {
   const st = curStep();
   const guided = play.status === 'guided';
   const solved = play.status === 'solved';
-  const disabled = solved || (guided && (!st || st.kind !== 'ask'));
+  const disabled = solved || (guided && (!st || (st.kind !== 'ask' && st.kind !== 'write')));
   let label = T('answerLabel');
-  if (guided && st && st.kind === 'ask') label = st.ask === 'ones' ? T('askOnes') : st.ask === 'tens' ? T('askTens') : T('askTotal');
+  if (guided && st && st.kind === 'ask') label = `${st.params.x} + ${st.params.y} = ?`;
   const cellsOn = usingCells();
   let shown = play.entry;
   if (cellsOn) {
@@ -482,7 +499,7 @@ function padEl() {
       : h('div', { class: 'rm-entry' },
         h('span', { class: 'rm-entry-l' }, label),
         h('span', { class: `rm-entry-v ${play.entryStale ? 'stale' : ''}` }, shown || ' '),
-        cellsOn ? h('span', { class: 'rm-entry-tip' }, T('tapBox')) : null),
+        cellsOn && !guided ? h('span', { class: 'rm-entry-tip' }, T('tapBox')) : null),
     h('div', { class: 'rm-keys' },
       [1, 2, 3, 4, 5, 6, 7, 8, 9].map(key),
       button(null, del, { cls: 'rm-key soft', ic: 'del', aria: T('del'), k: 'key-del', disabled }),
@@ -523,7 +540,15 @@ function toggleBlocks() {
 function press(d) {
   if (play.status === 'solved') return;
   const st = curStep();
-  if (play.status === 'guided' && (!st || st.kind !== 'ask')) return;
+  if (play.status === 'guided' && (!st || (st.kind !== 'ask' && st.kind !== 'write'))) return;
+  if (play.status === 'guided' && st.kind === 'write') {
+    play.cells[st.cell] = d;
+    play.activeCell = st.cell;
+    play.entryStale = false;
+    sfx.tap();
+    update();
+    return;
+  }
   if (usingCells()) {
     if (play.entryStale) clearCells();
     play.cells[play.activeCell] = d;
@@ -543,6 +568,8 @@ function press(d) {
 
 function del() {
   if (play.status === 'solved') return;
+  const gs = play.status === 'guided' ? curStep() : null;
+  if (gs && gs.kind === 'write') { play.cells[gs.cell] = ''; update(); return; }
   if (usingCells()) {
     if (play.entryStale) { clearCells(); update(); return; }
     const a = play.activeCell;
@@ -558,6 +585,15 @@ function del() {
 
 function submit() {
   if (!play || play.status === 'solved' || play.leaving) return;
+  if (play.status === 'guided') {
+    const st = curStep();
+    if (!st || (st.kind !== 'ask' && st.kind !== 'write')) return;
+    const g = st.kind === 'write'
+      ? (play.cells[st.cell] === '' ? null : Number(play.cells[st.cell]))
+      : parseEntry(play.entryStale ? '' : play.entry);
+    if (g === null) { toast(T('blankEntry')); sfx.soft(); return; }
+    return submitGuided(g);
+  }
   const n = usingCells() ? cellsValue() : parseEntry(play.entryStale ? '' : play.entry);
   if (n === 'needOnes') {
     play.activeCell = 'ones';
@@ -638,33 +674,30 @@ function startGuided(lead) {
 function stepBubble() {
   const g = play.guided;
   const st = curStep();
-  const params = words(st.params);
+  // paper-method texts talk about the written digits, so they keep plain numbers
+  const params = st.key.startsWith('w_') ? { ...st.params } : words(st.params);
+  if (st.key === 'w_split') params.ow = W().ones(st.params.o);
   let lead = g.lead;
   let text = T(st.key, params);
-  if (st.kind === 'ask' && g.wrongs > 0) {
-    if (st.ask === 'total') {
-      const tv = st.params.t * 10;
-      text = g.wrongs === 1
-        ? T('g_total_help', { t: W().tens(st.params.t), tv, o: W().ones(st.params.o) })
-        : T('g_total_tell', { t: W().tens(st.params.t), o: W().ones(st.params.o), n: st.expect });
-    } else if (g.wrongs === 1) {
-      lead = T('g_count');
-    } else {
-      text = T('g_tell', { what: st.ask === 'tens' ? W().tens(st.expect) : W().ones(st.expect), n: st.expect });
-    }
+  if ((st.kind === 'ask' || st.kind === 'write') && g.wrongs > 0) {
+    if (g.wrongs === 1) lead = T('g_count');
+    else text = T('w_tell', { n: st.expect });
   }
   const buttons = [];
-  if (st.kind === 'next') buttons.push({ label: T('ok', { pick: g.i }), onClick: advanceStep, primary: true, ic: 'next', k: 'g-next' });
-  if (st.kind === 'act') buttons.push({ label: T(`act_${st.act}`, params), onClick: doStepAct, primary: true, k: 'g-act' });
-  return { mood: st.kind === 'ask' ? 'think' : 'happy', lead, text, buttons, note: T('stepOf', { i: g.i + 1, n: g.steps.length }) };
+  if (st.kind === 'next') buttons.push({ label: T('ok', { pick: g.i }), onClick: st.final ? finishWithNext : advanceStep, primary: true, ic: 'next', k: 'g-next' });
+  if (st.kind === 'carry') buttons.push({ label: T('act_carry'), onClick: doCarry, primary: true, k: 'g-act' });
+  if (st.kind === 'borrow') buttons.push({ label: T('act_borrow'), onClick: doBorrow, primary: true, k: 'g-act' });
+  const thinking = st.kind === 'ask' || st.kind === 'write';
+  return { mood: thinking ? 'think' : 'happy', lead, text, buttons, note: T('stepOf', { i: g.i + 1, n: g.steps.length }) };
 }
 
 function enterStep() {
   const st = curStep();
   play.guided.startTrades = play.model.trades;
   play.guided.wrongs = 0;
+  play.guided.synced = false;
   play.focusCol = st.focus || null;
-  if (st.kind === 'ask' && st.ask === 'total') clearCells();
+  if (st.kind === 'write') { play.activeCell = st.cell; play.cells[st.cell] = ''; }
   setBubble(stepBubble);
   if (data.settings.autoRead) speak([play.bubble.lead, play.bubble.text].filter(Boolean).join(' '), L());
   update();
@@ -680,19 +713,36 @@ function advanceStep() {
   enterStep();
 }
 
-function doStepAct() {
+// The blocks move that goes with a step (only once).
+function syncStep(st) {
+  const g = play.guided;
+  if (!st || !st.sync || g.synced) return;
+  g.synced = true;
+  act((m) => M.applyAction(m, st.sync), { noAdvance: true });
+}
+function doCarry() {
   const st = curStep();
-  if (!st || st.kind !== 'act') return;
-  act((m) => M.applyAction(m, st.act));
+  if (!st || st.kind !== 'carry') return;
+  act(M.tradeUp);
+}
+function doBorrow() {
+  const st = curStep();
+  if (!st || st.kind !== 'borrow') return;
+  act(M.tradeDown);
+}
+function finishWithNext() {
+  syncStep(curStep());
+  solve();
 }
 
 function submitGuided(n) {
   const g = play.guided;
   const st = curStep();
-  if (!st || st.kind !== 'ask') return;
+  if (!st || (st.kind !== 'ask' && st.kind !== 'write')) return;
   if (n === st.expect) {
     play.entry = '';
     play.entryStale = false;
+    syncStep(st);
     if (st.final) return solve();
     sfx.pop();
     advanceStep();
@@ -700,8 +750,9 @@ function submitGuided(n) {
   }
   g.wrongs++;
   sfx.soft();
-  if (st.ask !== 'total' && g.wrongs >= 1) { play.counting = true; play.countedEver = true; }
-  play.entryStale = true;
+  if (g.wrongs === 1) { syncStep(st); play.counting = true; play.countedEver = true; }
+  if (st.kind === 'write') play.cells[st.cell] = '';
+  else play.entryStale = true;
   setBubble(stepBubble);
   if (data.settings.autoRead) speak([play.bubble.lead, play.bubble.text].filter(Boolean).join(' '), L());
   update();
@@ -817,7 +868,7 @@ function finishSession() {
 }
 
 // ---------------------------------------------------------------- blocks
-function act(fn) {
+function act(fn, opts = {}) {
   const m = play.model;
   const before = new Map(m.pieces.map((x) => [x.id, x.state]));
   const tr = m.trades;
@@ -837,9 +888,9 @@ function act(fn) {
   if (traded) { play.tradedEver = true; play.carryFresh = true; sfx.trade(); } else sfx.pop();
   data.active.current.blocksUsed = true;
   let advanced = false;
-  if (play.status === 'guided') {
+  if (play.status === 'guided' && !opts.noAdvance) {
     const st = curStep();
-    if (st && st.kind === 'act' && M.actionDone(m, st.act, play.guided.startTrades)) {
+    if (st && (st.kind === 'carry' || st.kind === 'borrow') && m.trades > play.guided.startTrades) {
       advanceStep();
       advanced = true;
     }
@@ -964,7 +1015,7 @@ function guidedWait() {
 function blockMode() {
   if (play.status !== 'guided') return 'explore';
   const st = curStep();
-  return st && st.kind === 'act' ? st.act : 'none';
+  return st && st.kind === 'carry' ? 'tradeUp' : st && st.kind === 'borrow' ? 'tradeDown' : 'none';
 }
 
 function onTray() {
