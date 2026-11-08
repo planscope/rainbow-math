@@ -481,3 +481,8 @@ button.rm-w-ans:not(:disabled) { cursor: pointer; }
   .rm-a-tools { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 .rm-select { min-height: 48px; font: inherit; font-size: 17px; padding: 6px 10px; border-radius: 14px; border: 2px solid var(--line); background: #fff; color: var(--ink); max-width: 100%; }
+/* answer boxes are buttons now: keep their big digits */
+.rm .rm-written .rm-w-ans { font-size: 60px; font-weight: 700; line-height: 1.05; }
+@media (min-width: 1150px) and (min-height: 800px) {
+  .rm .rm-written .rm-w-ans { font-size: 70px; }
+}
