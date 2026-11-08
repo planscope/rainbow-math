@@ -503,3 +503,9 @@ button.rm-split-t.tap { min-width: 48px; height: 48px; cursor: pointer; box-shad
   box-shadow: 0 0 0 6px rgba(255, 192, 30, .3); animation: rm-glow 1.6s ease-in-out infinite;
 }
 @keyframes rm-glow { 50% { box-shadow: 0 0 0 10px rgba(255, 192, 30, .15); } }
+
+/* ---------------------------------------------------------------- v4: column by column */
+.rm .rm-written .rm-w-ans.two { font-size: 44px; letter-spacing: -1px; }
+.rm-box-ten { display: inline-grid; place-items: center; min-width: 40px; height: 44px; border-radius: 999px; background: #ffe066; border: 3px solid #f08c00; color: #7a3e00; margin-right: 2px; }
+.rm-carry { position: relative; z-index: 3; }
+.rm .rm-borrow-btn.quiet { animation: none; box-shadow: none; border: 3px dashed #f3c46b; background: transparent; }

@@ -1,10 +1,10 @@
 // Mila's Rainbow Math Adventure: screens and interaction.
-import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js?v=4';
-import * as M from './model.js?v=4';
-import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=4';
-import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG } from './art.js?v=4';
-import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults } from './store.js?v=4';
-import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=4';
+import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js?v=5';
+import * as M from './model.js?v=5';
+import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=5';
+import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG } from './art.js?v=5';
+import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults } from './store.js?v=5';
+import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=5';
 
 // ---------------------------------------------------------------- setup
 function mount() {
@@ -301,6 +301,10 @@ function initPlay() {
     drawing: false,
     strokes: [],
     carryFresh: false,
+    phase: 'ones',       // answering column by column, like on paper
+    staleCell: null,     // a box with a number that wasn't right yet
+    splitting: false,    // showing 12 in the ones box just before the 1 goes up
+    carryFromBox: null,  // where the carried 1 starts its flight
     status: c.solved ? 'solved' : 'ask',
     guided: null,
     focusCol: null,
@@ -340,6 +344,14 @@ function cellsValue() {
 }
 function selectCell(col) {
   if (!usingCells() || play.status === 'solved') return;
+  if (play.status === 'ask') {
+    if (col === phaseCell()) { sfx.tap(); return; }
+    if (col === 'tens') { toast(T('onesFirst')); sfx.soft(); return; }
+    restartColumns();
+    sfx.tap();
+    update();
+    return;
+  }
   const st = curStep();
   if (play.status === 'guided' && st && st.cell !== col) { guidedWait(); return; }
   if (play.entryStale) clearCells();
@@ -433,10 +445,11 @@ function writtenEl() {
   // Carrying (addition) or trading (subtraction) is drawn as an arrow between the columns,
   // and the moved number glides into place the moment it happens.
   const fresh = play.carryFresh && !reduced();
+  const flyFromBox = !!play.carryFromBox;
   const arrow = (dir) => h('span', { class: `rm-w-arrow ${dir} ${fresh ? 'fresh' : ''}`, html: CARRY_ARROW, 'aria-hidden': 'true' });
   let markT = null, markO = null;
   if (traded && p.op === '+') {
-    markT = h('span', { class: 'rm-w-markwrap' }, h('span', { class: `rm-carry ${fresh ? 'fly-left' : ''}` }, '1'), arrow('to-tens'));
+    markT = h('span', { class: 'rm-w-markwrap' }, h('span', { class: `rm-carry ${fresh && !flyFromBox ? 'fly-left' : ''}` }, '1'), arrow('to-tens'));
   }
   if (traded && p.op === '-') {
     markT = h('span', { class: 'rm-w-markwrap' }, h('span', { class: 'rm-borrow-t' }, String(a10 - 1)), arrow('to-ones'));
@@ -455,18 +468,22 @@ function writtenEl() {
   }
   const cell = (txt, col, extra = '') => h('span', { class: `rm-w-c ${col} ${fc === col ? 'focus' : ''} ${extra}` }, txt);
   const borrowNow = gst && gst.kind === 'borrow' && !traded;
-  const topTens = borrowNow
-    ? h('button', { type: 'button', class: 'rm-w-c tens num-a rm-borrow-btn', 'data-k': 'borrow-digit', 'aria-label': T('act_borrow'), onclick: doBorrow }, String(a10))
+  // while answering on her own, Mila may tap the tens digit to borrow when she needs to
+  const borrowOwn = play.status === 'ask' && p.op === '-' && a1 < b1 && !traded && play.phase === 'ones';
+  const topTens = borrowNow || borrowOwn
+    ? h('button', { type: 'button', class: `rm-w-c tens num-a rm-borrow-btn ${borrowOwn ? 'quiet' : ''}`, 'data-k': 'borrow-digit', 'aria-label': T('act_borrow'), onclick: borrowOwn ? borrowByTap : doBorrow }, String(a10))
     : cell(String(a10), 'tens', `num-a ${traded && p.op === '-' ? 'struck' : ''}`);
   const cellsOn = usingCells() && play.status !== 'solved';
   const box = (txt, col, pen) => h('button', {
     type: 'button',
-    class: `rm-w-c ${col} rm-w-ans ${pen ? 'pencil' : ''} ${play.entryStale && !pen ? 'stale' : ''} ${cellsOn && play.activeCell === col ? 'active' : ''} ${fc === col ? 'focus' : ''}`,
+    class: `rm-w-c ${col} rm-w-ans ${pen ? 'pencil' : ''} ${(play.entryStale || play.staleCell === col) && !pen ? 'stale' : ''} ${cellsOn && play.activeCell === col ? 'active' : ''} ${fc === col ? 'focus' : ''} ${String(txt).length === 2 ? 'two' : ''}`,
     'data-k': `cell-${col}`,
     'aria-label': `${col === 'tens' ? T('tensCol') : T('onesCol')}: ${txt || '?'}`,
     disabled: !cellsOn,
     onclick: () => selectCell(col),
-  }, txt);
+  }, col === 'ones' && play.splitting && String(txt).length === 2
+    ? [h('span', { class: 'rm-box-ten' }, String(txt)[0]), String(txt)[1]]
+    : txt);
   return h('div', { class: `rm-written ${traded || (gst && gst.split) ? 'traded' : ''}` },
     h('span', { class: 'rm-w-op' }), cell(T('tensCol'), 'tens', 'rm-w-h'), cell(T('onesCol'), 'ones', 'rm-w-h'),
     h('span', { class: 'rm-w-op' }), cell(markT, 'tens', 'rm-w-mark'), cell(markO, 'ones', 'rm-w-mark'),
@@ -486,10 +503,16 @@ function padEl() {
   if (guided && st && st.kind === 'ask') label = `${st.params.x} + ${st.params.y} = ?`;
   const cellsOn = usingCells();
   let shown = play.entry;
-  if (cellsOn) {
+  let tip = null;
+  if (cellsOn && play.status === 'ask') {
+    const info = colInfo();
+    const col = phaseCell();
+    label = `${col === 'ones' ? T('onesCol') : T('tensCol')}: ${col === 'ones' ? info.onesExpr : info.tensExpr} = ?`;
+    shown = play.staleCell === col ? play.cells[col] : play.cells[col];
+    tip = col === 'ones' ? T('tipOnes') : T('tipTens');
+  } else if (cellsOn) {
     label = T('typingIn', { box: play.activeCell === 'ones' ? T('onesCol') : T('tensCol') });
-    const { tens, ones } = play.cells;
-    shown = tens ? `${tens}${ones || '?'}` : ones;
+    shown = play.cells[play.activeCell];
   }
   const key = (d) => button(String(d), () => press(String(d)), { cls: 'rm-key', k: `key-${d}`, disabled });
   const last = data.active.index + 1 >= data.active.length;
@@ -499,7 +522,7 @@ function padEl() {
       : h('div', { class: 'rm-entry' },
         h('span', { class: 'rm-entry-l' }, label),
         h('span', { class: `rm-entry-v ${play.entryStale ? 'stale' : ''}` }, shown || ' '),
-        cellsOn && !guided ? h('span', { class: 'rm-entry-tip' }, T('tapBox')) : null),
+        tip ? h('span', { class: 'rm-entry-tip' }, tip) : null),
     h('div', { class: 'rm-keys' },
       [1, 2, 3, 4, 5, 6, 7, 8, 9].map(key),
       button(null, del, { cls: 'rm-key soft', ic: 'del', aria: T('del'), k: 'key-del', disabled }),
@@ -549,11 +572,18 @@ function press(d) {
     update();
     return;
   }
-  if (usingCells()) {
-    if (play.entryStale) clearCells();
-    play.cells[play.activeCell] = d;
-    // like on paper: ones first, then move over to the tens box
-    if (play.activeCell === 'ones' && play.cells.tens === '') play.activeCell = 'tens';
+  if (play.status === 'ask') {
+    if (play.splitting) return;
+    const col = phaseCell();
+    if (play.staleCell === col || play.entryStale) { play.cells[col] = ''; play.staleCell = null; play.entryStale = false; }
+    if (col === 'ones') {
+      // the ones can add up to a two-digit number, like 4 + 8 = 12
+      const cur = play.cells.ones;
+      play.cells.ones = cur.length >= 2 || cur === '0' ? d : cur + d;
+    } else {
+      play.cells.tens = d;
+    }
+    play.activeCell = col;
     sfx.tap();
     update();
     return;
@@ -570,11 +600,12 @@ function del() {
   if (play.status === 'solved') return;
   const gs = play.status === 'guided' ? curStep() : null;
   if (gs && gs.kind === 'write') { play.cells[gs.cell] = ''; update(); return; }
-  if (usingCells()) {
-    if (play.entryStale) { clearCells(); update(); return; }
-    const a = play.activeCell;
-    if (play.cells[a] !== '') play.cells[a] = '';
-    else { const o = a === 'ones' ? 'tens' : 'ones'; play.cells[o] = ''; play.activeCell = o; }
+  if (play.status === 'ask') {
+    if (play.splitting) return;
+    const col = phaseCell();
+    play.cells[col] = play.staleCell === col ? '' : play.cells[col].slice(0, -1);
+    play.staleCell = null;
+    play.entryStale = false;
     update();
     return;
   }
@@ -594,6 +625,7 @@ function submit() {
     if (g === null) { toast(T('blankEntry')); sfx.soft(); return; }
     return submitGuided(g);
   }
+  if (play.status === 'ask') return submitColumn();
   const n = usingCells() ? cellsValue() : parseEntry(play.entryStale ? '' : play.entry);
   if (n === 'needOnes') {
     play.activeCell = 'ones';
@@ -637,8 +669,158 @@ function submit() {
 
 function tryAgain() {
   play.entry = '';
+  if (play.status === 'ask') {
+    play.cells[phaseCell()] = '';
+    play.staleCell = null;
+    play.entryStale = false;
+    setBubble(() => ({ mood: 'happy', text: T('prompt', { pick: data.active.current.prompt }) }));
+    update();
+    return;
+  }
   clearCells();
   setBubble(() => ({ mood: 'happy', text: T('prompt', { pick: data.active.current.prompt }) }));
+  update();
+}
+
+// ---------------------------------------------------------------- column by column (paper method)
+const phaseCell = () => (play.phase === 'tens' ? 'tens' : 'ones');
+
+// What each column should add up to, and how to say it (e.g. "1 + 1 + 3").
+function colInfo() {
+  const p = play.p, m = play.model;
+  const a10 = tensOf(p.a), a1 = onesOf(p.a), b10 = tensOf(p.b), b1 = onesOf(p.b);
+  if (p.op === '+') {
+    const sum = a1 + b1;
+    const carry = sum >= 10 ? 1 : 0;
+    return { a10, a1, b10, b1, carry, onesExpect: sum, onesExpr: `${a1} + ${b1}`, tensExpect: a10 + b10 + carry, tensExpr: carry ? `1 + ${a10} + ${b10}` : `${a10} + ${b10}` };
+  }
+  const borrow = a1 < b1 ? 1 : 0;
+  const borrowed = m.trades > 0;
+  return {
+    a10, a1, b10, b1, borrow, borrowed,
+    onesExpect: a1 + 10 * borrow - b1,
+    onesExpr: `${borrowed ? a1 + 10 : a1} \u2212 ${b1}`,
+    tensExpect: a10 - borrow - b10,
+    tensExpr: `${a10 - borrow} \u2212 ${b10}`,
+  };
+}
+
+function restartColumns() {
+  play.phase = 'ones';
+  play.cells = { tens: '', ones: '' };
+  play.activeCell = 'ones';
+  play.staleCell = null;
+  play.splitting = false;
+  play.model = M.makeModel(play.p);
+  setBubble(introBubble);
+}
+
+function submitColumn() {
+  if (play.splitting) return;
+  const col = phaseCell();
+  const info = colInfo();
+  const raw = play.staleCell === col ? '' : play.cells[col];
+  let v = raw === '' ? null : Number(raw);
+  if (col === 'tens' && v === null && info.tensExpect === 0) v = 0; // no tens: the box may stay empty
+  if (v === null) { toast(T('blankEntry')); sfx.soft(); return; }
+  const expect = col === 'ones' ? info.onesExpect : info.tensExpect;
+  if (v !== expect) { columnWrong(col, v, info); return; }
+  if (col === 'tens') { solve(); return; }
+  onesDone(v, info);
+}
+
+// The ones are right. For 4 + 8 = 12 the 2 stays in the box and the 1 flies up on top of the tens.
+function onesDone(v, info) {
+  const p = play.p;
+  sfx.pop();
+  play.focusCol = null;
+  if (p.op === '+' && v >= 10) {
+    play.splitting = true;
+    play.cells.ones = String(v);
+    setBubble(() => ({ mood: 'cheer', text: T('col_split', { s: v, o: v % 10 }) }));
+    update();
+    setTimeout(() => {
+      if (!play || play.status !== 'ask' || !play.splitting) return;
+      play.splitting = false;
+      play.cells.ones = String(v % 10);
+      play.phase = 'tens';
+      play.activeCell = 'tens';
+      const box = root.querySelector('[data-k="cell-ones"]');
+      play.carryFromBox = box ? box.getBoundingClientRect() : null;
+      setBubble(() => ({ mood: 'cheer', lead: T('col_carry_lead', { s: v, o: v % 10, t: info.a10 }), text: T('col_tens', { expr: info.tensExpr }) }));
+      const moved = play.model.trades === 0 && act((m) => { if (M.canBringOnes(m)) M.bringOnes(m); return M.tradeUp(m); }, { noAdvance: true });
+      if (!moved) update();
+      flyCarryFromBox();
+    }, reduced() ? 300 : 900);
+    return;
+  }
+  play.cells.ones = String(v);
+  play.phase = 'tens';
+  play.activeCell = 'tens';
+  if (p.op === '-' && info.borrow && play.model.trades === 0) {
+    // she borrowed in her head: show what that looks like on paper and in the blocks
+    setBubble(() => ({ mood: 'happy', lead: T('col_borrow_lead', { t0: info.a10, t: info.a10 - 1, x: info.a1, o: info.a1 + 10 }), text: T('col_tens', { expr: info.tensExpr }) }));
+    if (!act(M.tradeDown, { noAdvance: true })) update();
+    return;
+  }
+  setBubble(() => ({ mood: 'happy', lead: T('col_nice_ones'), text: T('col_tens', { expr: colInfo().tensExpr }) }));
+  update();
+}
+
+function flyCarryFromBox() {
+  const r = play && play.carryFromBox;
+  if (play) play.carryFromBox = null;
+  if (!r || reduced()) return;
+  const badge = root.querySelector('.rm-carry');
+  if (!badge || typeof badge.animate !== 'function') return;
+  const b = badge.getBoundingClientRect();
+  const dx = r.left + r.width * 0.3 - (b.left + b.width / 2);
+  const dy = r.top + r.height / 2 - (b.top + b.height / 2);
+  badge.animate([
+    { transform: `translate(${dx}px, ${dy}px) scale(1.3)` },
+    { transform: `translate(${dx * 0.8}px, ${dy * 0.45}px) scale(1.6)`, offset: 0.45 },
+    { transform: 'translate(0px, 0px) scale(1)' },
+  ], { duration: 1400, easing: 'cubic-bezier(.35, .1, .25, 1)', fill: 'backwards' });
+}
+
+function borrowByTap() {
+  if (play.status !== 'ask' || play.model.trades > 0) return;
+  const info = colInfo();
+  setBubble(() => ({ mood: 'happy', lead: T('col_borrow_lead', { t0: info.a10, t: info.a10 - 1, x: info.a1, o: info.a1 + 10 }), text: T('col_ones_now', { expr: colInfo().onesExpr }) }));
+  if (!act(M.tradeDown, { noAdvance: true })) update();
+}
+
+function columnWrong(col, v, info) {
+  const p = play.p;
+  const c = data.active.current;
+  c.wrongs++;
+  save(data);
+  sfx.soft();
+  if (c.wrongs >= 2) { startGuided(T('wrong2')); return; }
+  play.focusCol = col;
+  play.staleCell = col;
+  let text;
+  if (col === 'ones') {
+    text = p.op === '-' && info.borrow && !info.borrowed && v === info.b1 - info.a1
+      ? T('col_sub_reverse', { x: info.a1, y: info.b1, t: info.a10 })
+      : T('col_check_ones', { expr: info.onesExpr });
+  } else if (p.op === '+' && info.carry && v === info.a10 + info.b10) {
+    text = T('col_forgot_carry', { v, t: info.a10, u: info.b10 });
+  } else if (p.op === '-' && info.borrow && v === info.a10 - info.b10) {
+    text = T('col_forgot_borrow', { t0: info.a10, t: info.a10 - 1 });
+  } else {
+    text = T('col_check_tens', { expr: info.tensExpr });
+  }
+  const leadPick = rand(3);
+  setBubble(() => ({
+    mood: 'think',
+    lead: T('wrong1', { pick: leadPick }),
+    text,
+    buttons: [
+      { label: T('tryAgain'), onClick: tryAgain, primary: true, k: 'try' },
+      { label: T('helpSteps'), onClick: startGuided, ic: 'help', k: 'steps' },
+    ],
+  }));
   update();
 }
 
@@ -1193,7 +1375,7 @@ function matPanel() {
   const explore = [];
   explore.push(button(play.counting ? T('countOff') : T('countOn'), () => { play.counting = !play.counting; if (play.counting) play.countedEver = true; sfx.tap(); update(); }, { cls: 'small soft', ic: 'count', k: 'count', pressed: play.counting }));
   if (!guided && play.status !== 'solved') {
-    explore.push(button(T('matStart'), () => { play.model = M.makeModel(p); sfx.tap(); update(); }, { cls: 'small soft', ic: 'reset', k: 'mat-reset' }));
+    explore.push(button(T('matStart'), () => { if (play.status === 'ask') restartColumns(); else play.model = M.makeModel(p); sfx.tap(); update(); }, { cls: 'small soft', ic: 'reset', k: 'mat-reset' }));
     if (m.op === '+') {
       explore.push(button(T('addOnes'), () => act((mm) => M.applyAction(mm, 'bringOnes')), { cls: 'small', k: 'x-ones', disabled: !M.canBringOnes(m) }));
       explore.push(button(T('addTens'), () => act((mm) => M.applyAction(mm, 'bringTens')), { cls: 'small', k: 'x-tens', disabled: !M.canBringTens(m) }));
