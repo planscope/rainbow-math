@@ -2,8 +2,8 @@
 // tools/eleven.mjs). Each line is one whole recording, so it sounds natural.
 // The app never calls ElevenLabs. If a recording is missing it says false and
 // the app uses the device voice instead.
-import { audioCtx, stopSpeaking } from './audio.js?v=13';
-import { clipId } from './voicelines.js?v=13';
+import { audioCtx, stopSpeaking } from './audio.js?v=14';
+import { clipId } from './voicelines.js?v=14';
 
 // iPad/iPhone play the recordings with a regular audio player (the kind videos use):
 // it is not silenced by the mute switch the way Web Audio can be.
@@ -24,14 +24,23 @@ export function unlockMedia() {
   const a = mediaEl();
   if (!a || a.__unlocked) return;
   a.__unlocked = true;
-  a.muted = true;
+  // must be an unmuted play inside the tap, or Safari won't count it (the clip itself is silent)
+  a.muted = false;
   a.src = new URL('../audio/silence.mp3', import.meta.url).href;
   const p = a.play();
-  if (p && p.then) p.then(() => { a.pause(); a.muted = false; }).catch(() => { a.muted = false; a.__unlocked = false; });
+  if (p && p.then) p.then(() => { voiceInfo.unlocked = true; }).catch((e) => { a.__unlocked = false; voiceInfo.unlockError = e && e.name; });
 }
 
 let manifest = null;
 let manifestLoading = null;
+
+// What happened the last time a line was said (shown in the grown-ups voice check).
+export const voiceInfo = { ios: IOS, unlocked: false, unlockError: null, last: null };
+export async function voiceNames() {
+  const m = await loadManifest();
+  if (!m) return null;
+  return m.voices || { es: m.voice_name, en: m.voice_name };
+}
 const buffers = new Map();
 let current = null;
 let token = 0;
@@ -39,7 +48,7 @@ let token = 0;
 // Everyone waits for the same download (two lines asked at once both get the list).
 function loadManifest() {
   if (!manifestLoading) {
-    manifestLoading = fetch(new URL('../audio/manifest.json?v=13', import.meta.url))
+    manifestLoading = fetch(new URL('../audio/manifest.json?v=14', import.meta.url))
       .then((r) => (r.ok ? r.json() : null))
       .then((m) => { manifest = m; return m; })
       .catch(() => null); // no recordings: device voice is used
@@ -81,7 +90,7 @@ export async function playLine(lang, key, v = null) {
   const my = ++token;
   const m = await loadManifest();
   const file = m && m.clips && m.clips[clipId(lang, key, v)];
-  if (!file) return false;
+  if (!file) { voiceInfo.last = { how: 'device', key, reason: m ? 'no recording for this line' : 'recordings list did not load' }; return false; }
   if (IOS && media && media.__unlocked) {
     const tag = m.generated ? `?g=${encodeURIComponent(m.generated)}` : '';
     try {
@@ -90,14 +99,15 @@ export async function playLine(lang, key, v = null) {
       media.muted = false;
       media.src = new URL(`../audio/${file}${tag}`, import.meta.url).href;
       await media.play();
+      voiceInfo.last = { how: 'recording', via: 'iPad player', key };
       return true;
-    } catch (e) { /* fall back to Web Audio below */ }
+    } catch (e) { voiceInfo.mediaError = e && e.name; /* fall back to Web Audio below */ }
     if (my !== token) return true;
   }
   const ctx = audioCtx();
-  if (!ctx) return false;
+  if (!ctx) { voiceInfo.last = { how: 'device', key, reason: 'sound is off or no Web Audio' }; return false; }
   let buf;
-  try { buf = await getBuffer(ctx, file); } catch (e) { return false; }
+  try { buf = await getBuffer(ctx, file); } catch (e) { voiceInfo.last = { how: 'device', key, reason: `could not load the recording (${e && e.message})` }; return false; }
   if (my !== token) return true; // something newer was asked for meanwhile
   stopSpeaking();
   if (current) { try { current.stop(); } catch (e) { /* ignore */ } }
@@ -106,5 +116,6 @@ export async function playLine(lang, key, v = null) {
   src.connect(ctx.destination);
   src.start(ctx.currentTime + 0.02);
   current = src;
+  voiceInfo.last = { how: 'recording', via: `Web Audio (${ctx.state})`, key };
   return true;
 }

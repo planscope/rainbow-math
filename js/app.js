@@ -1,14 +1,14 @@
 // Mila's Rainbow Math Adventure: screens and interaction.
-import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js?v=13';
-import * as M from './model.js?v=13';
-import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=13';
-import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL } from './levels.js?v=13';
-import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=13';
-import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=13';
-import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults, loadPlayers, savePlayers, addPlayer, removePlayer, pinHash } from './store.js?v=13';
-import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking as stopDeviceSpeech, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=13';
-import { playLine, stopClips, preloadLines, unlockMedia } from './voice.js?v=13';
-import { lineText } from './voicelines.js?v=13';
+import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js?v=14';
+import * as M from './model.js?v=14';
+import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=14';
+import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL } from './levels.js?v=14';
+import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=14';
+import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=14';
+import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults, loadPlayers, savePlayers, addPlayer, removePlayer, pinHash } from './store.js?v=14';
+import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking as stopDeviceSpeech, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=14';
+import { playLine, stopClips, preloadLines, unlockMedia, voiceInfo, voiceNames } from './voice.js?v=14';
+import { lineText } from './voicelines.js?v=14';
 const stopSpeaking = () => { stopDeviceSpeech(); stopClips(); };
 
 // ---------------------------------------------------------------- setup
@@ -253,7 +253,7 @@ function sayLine(key, v = null, still = () => true) {
   if (!coachTalks()) return;
   const lang = L();
   const device = () => { const t = lineText(lang, key, v); if (t) speak(t, lang, { pitch: 1.5, rate: 1.0 }); };
-  if (data.settings.coachVoiceKind === 'device') { device(); return; }
+  if (data.settings.coachVoiceKind === 'device') { voiceInfo.last = { how: 'device', key, reason: 'grown-ups chose the device voice' }; device(); return; }
   playLine(lang, key, v).then((ok) => { if (!ok && still()) device(); });
 }
 const cheer = () => sayLine(`yay${1 + rand(3)}`);
@@ -2264,6 +2264,7 @@ function viewParent() {
       seg(T('p_coachVoice'), st.coachVoice !== false, [[true, T('p_on')], [false, T('p_off')]], (v) => { st.coachVoice = v; }),
       seg(T('p_coachVoiceKind'), st.coachVoiceKind === 'device' ? 'device' : 'cartoon', [['cartoon', T('p_vk_cartoon')], ['device', T('p_vk_device')]], (v) => { st.coachVoiceKind = v; }),
       voiceField(),
+      voiceCheck(),
       seg(T('p_motion'), st.motion, [['auto', T('p_motionAuto')], ['reduce', T('p_motionReduce')]], (v) => { st.motion = v; })),
     h('section', { class: 'rm-card rm-p-sec' },
       h('h3', { class: 'rm-h3' }, T('p_progress')),
@@ -2315,6 +2316,23 @@ function voiceField() {
       button(T('p_voiceTest'), () => readAloud(T('voiceSample')), { cls: 'small', ic: 'read', k: 'voice-test' })),
     canSpeak() && !voices.length ? h('p', { class: 'rm-small' }, T('p_noVoices')) : null,
     h('p', { class: 'rm-small' }, T('p_voiceTip')));
+}
+
+// Shows which voice the guide really used last, and lets a grown-up test it with a tap.
+let voiceNamesCache = null;
+function voiceCheck() {
+  if (!voiceNamesCache) voiceNames().then((v) => { voiceNamesCache = v || {}; if (screen === 'parent') update(); });
+  const lang = L();
+  const vi = voiceInfo;
+  const last = vi.last
+    ? (vi.last.how === 'recording' ? T('vc_rec', { via: vi.last.via }) : T('vc_dev', { why: vi.last.reason || '?' }))
+    : T('vc_none');
+  return h('div', { class: 'rm-field rm-vcheck' },
+    h('div', { class: 'rm-field-l' }, T('vc_title')),
+    h('p', { class: 'rm-small' }, T('vc_voice', { lang: lang === 'es' ? 'Español' : 'English', who: (voiceNamesCache && voiceNamesCache[lang]) || '\u2026' })),
+    h('p', { class: 'rm-small' }, `${T('vc_last')}: ${last}`),
+    h('p', { class: 'rm-small' }, `iPad: ${vi.ios ? T('p_on') : T('p_off')} \u00b7 ${T('p_sound')}: ${data.settings.sound ? T('p_on') : T('p_off')} \u00b7 v14${vi.unlockError ? ` \u00b7 unlock: ${vi.unlockError}` : ''}${vi.mediaError ? ` \u00b7 player: ${vi.mediaError}` : ''}`),
+    button(T('vc_test'), () => { unlockMedia(); unlockAudio(); sayLine('hello'); setTimeout(() => { if (screen === 'parent') update(); }, 1200); }, { cls: 'small', ic: 'read', k: 'vc-test' }));
 }
 
 function resetProgress() {
