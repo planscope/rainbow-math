@@ -1,14 +1,14 @@
 // Mila's Rainbow Math Adventure: screens and interaction.
-import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js?v=11';
-import * as M from './model.js?v=11';
-import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=11';
-import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL } from './levels.js?v=11';
-import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=11';
-import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=11';
-import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults, loadPlayers, savePlayers, addPlayer, removePlayer, pinHash } from './store.js?v=11';
-import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking as stopDeviceSpeech, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=11';
-import { playLine, stopClips, preloadLines } from './voice.js?v=11';
-import { lineText } from './voicelines.js?v=11';
+import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js?v=12';
+import * as M from './model.js?v=12';
+import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=12';
+import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL } from './levels.js?v=12';
+import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=12';
+import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=12';
+import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults, loadPlayers, savePlayers, addPlayer, removePlayer, pinHash } from './store.js?v=12';
+import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking as stopDeviceSpeech, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=12';
+import { playLine, stopClips, preloadLines } from './voice.js?v=12';
+import { lineText } from './voicelines.js?v=12';
 const stopSpeaking = () => { stopDeviceSpeech(); stopClips(); };
 
 // ---------------------------------------------------------------- setup

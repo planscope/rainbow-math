@@ -2,28 +2,31 @@
 // tools/eleven.mjs). Each line is one whole recording, so it sounds natural.
 // The app never calls ElevenLabs. If a recording is missing it says false and
 // the app uses the device voice instead.
-import { audioCtx, stopSpeaking } from './audio.js?v=11';
-import { clipId } from './voicelines.js?v=11';
+import { audioCtx, stopSpeaking } from './audio.js?v=12';
+import { clipId } from './voicelines.js?v=12';
 
 let manifest = null;
-let manifestTried = false;
+let manifestLoading = null;
 const buffers = new Map();
 let current = null;
 let token = 0;
 
-async function loadManifest() {
-  if (manifestTried) return manifest;
-  manifestTried = true;
-  try {
-    const r = await fetch(new URL('../audio/manifest.json?v=11', import.meta.url));
-    if (r.ok) manifest = await r.json();
-  } catch (e) { /* no recordings: device voice is used */ }
-  return manifest;
+// Everyone waits for the same download (two lines asked at once both get the list).
+function loadManifest() {
+  if (!manifestLoading) {
+    manifestLoading = fetch(new URL('../audio/manifest.json?v=12', import.meta.url))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((m) => { manifest = m; return m; })
+      .catch(() => null); // no recordings: device voice is used
+  }
+  return manifestLoading;
 }
 
 function getBuffer(ctx, file) {
   if (buffers.has(file)) return buffers.get(file);
-  const p = fetch(new URL(`../audio/${file}`, import.meta.url))
+  // the recording date in the URL makes devices fetch new takes after a re-recording
+  const tag = manifest && manifest.generated ? `?g=${encodeURIComponent(manifest.generated)}` : '';
+  const p = fetch(new URL(`../audio/${file}${tag}`, import.meta.url))
     .then((r) => { if (!r.ok) throw new Error('clip'); return r.arrayBuffer(); })
     .then((a) => new Promise((res, rej) => ctx.decodeAudioData(a, res, rej)));
   buffers.set(file, p);

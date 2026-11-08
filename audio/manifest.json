@@ -2,7 +2,7 @@
  "voice_id": "jBpfuIE2acCO8z3wKNLl",
  "voice_name": "Gigi",
  "model": "eleven_v3",
- "generated": "2026-11-08T23:06:10.941Z",
+ "generated": "2026-11-08T23:25:27.952Z",
  "clips": {
   "en-borrow_tap-2": "en-borrow_tap-2.mp3",
   "en-borrow_tap-3": "en-borrow_tap-3.mp3",
@@ -226,5 +226,9 @@
   "es-place_start": "[cheerful] ¡Vamos a ver todo lo que ya sabes! Solo haz tu mejor esfuerzo.",
   "es-place_next": "[gently] ¡Buen intento! Vamos con otro.",
   "es-place_done": "[excited] ¡Listo! ¡Encontré el nivel perfecto para ti!"
+ },
+ "voices": {
+  "es": "Gigi",
+  "en": "Jessica (cgSgspJ2msm6clMCkdW9)"
  }
 }

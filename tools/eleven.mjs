@@ -122,7 +122,31 @@ async function generate(voiceId, name = '') {
   console.log(`manifest: ${Object.keys(manifest.clips).length} clips`);
 }
 
+// Re-records every line of one language with another voice (e.g. English with Jessica).
+async function relang(lang, voiceId, name) {
+  const all = allLines();
+  const ids = Object.keys(all).filter((id) => all[id].lang === lang);
+  console.log(`re-recording ${ids.length} ${lang} lines with ${name}`);
+  let done = 0;
+  const work = ids.slice();
+  async function worker() {
+    while (work.length) {
+      const id = work.shift();
+      fs.writeFileSync(path.join(AUDIO, `${id}.mp3`), await tts(voiceId, all[id].text, lang));
+      done++;
+      if (done % 20 === 0 || done === ids.length) console.log(`  ${done}/${ids.length}`);
+    }
+  }
+  await Promise.all([worker(), worker(), worker()]);
+  const mf = path.join(AUDIO, 'manifest.json');
+  const manifest = JSON.parse(fs.readFileSync(mf, 'utf8'));
+  manifest.voices = { ...(manifest.voices || { es: manifest.voice_name, en: manifest.voice_name }), [lang]: `${name} (${voiceId})` };
+  manifest.generated = new Date().toISOString();
+  fs.writeFileSync(mf, JSON.stringify(manifest, null, 1));
+  console.log('manifest updated', manifest.voices);
+}
+
 const [cmd, ...args] = process.argv.slice(2);
-const run = { voices, add, sample, generate }[cmd];
+const run = { voices, add, sample, generate, relang }[cmd];
 if (!run) { console.log('use: voices | add <owner> <voice> <name> | sample <voice> <name> | generate <voice> [name]'); process.exit(1); }
 run(...args).catch((e) => { console.error('ERROR:', e.message); process.exit(1); });
