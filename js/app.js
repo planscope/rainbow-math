@@ -1,12 +1,12 @@
 // Mila's Rainbow Math Adventure: screens and interaction.
-import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js?v=6';
-import * as M from './model.js?v=6';
-import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=6';
-import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL } from './levels.js?v=6';
-import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=6';
-import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=6';
-import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults } from './store.js?v=6';
-import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=6';
+import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js?v=7';
+import * as M from './model.js?v=7';
+import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=7';
+import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL } from './levels.js?v=7';
+import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=7';
+import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=7';
+import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults } from './store.js?v=7';
+import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=7';
 
 // ---------------------------------------------------------------- setup
 function mount() {
@@ -690,7 +690,7 @@ function padEl() {
   const solved = play.status === 'solved';
   const disabled = solved || (guided && (!st || (st.kind !== 'ask' && st.kind !== 'write')));
   let label = T('answerLabel');
-  if (guided && st && st.kind === 'ask') label = `${st.params.x} + ${st.params.y} = ?`;
+  if (guided && st && st.kind === 'ask') label = `${st.label || `${st.params.x} + ${st.params.y}`} = ?`;
   else if (isMul()) label = `${play.p.a} \u00d7 ${play.p.b} = ?`;
   const cellsOn = usingCells();
   let shown = play.entry;
@@ -701,6 +701,8 @@ function padEl() {
     label = `${col === 'ones' ? T('onesCol') : T('tensCol')}: ${col === 'ones' ? info.onesExpr : info.tensExpr} = ?`;
     shown = play.staleCell === col ? play.cells[col] : play.cells[col];
     tip = col === 'ones' ? T('tipOnes') : T('tipTens');
+    if (col === 'ones' && play.p.op === '-' && info.borrow && !info.borrowed) tip = T('tipBorrow', { x: info.a1, y: info.b1, t: info.a10 });
+    if (col === 'ones' && play.p.op === '-' && info.borrowed && info.a1 > 0) tip = T('tipSplit', { o: info.a1 + 10, r: info.a1 });
   } else if (cellsOn) {
     label = T('typingIn', { box: play.activeCell === 'ones' ? T('onesCol') : T('tensCol') });
     shown = play.cells[play.activeCell];
@@ -978,7 +980,12 @@ function flyCarryFromBox() {
 function borrowByTap() {
   if (play.status !== 'ask' || play.model.trades > 0) return;
   const info = colInfo();
-  setBubble(() => ({ mood: 'happy', lead: T('col_borrow_lead', { t0: info.a10, t: info.a10 - 1, x: info.a1, o: info.a1 + 10 }), text: T('col_ones_now', { expr: colInfo().onesExpr }) }));
+  setBubble(() => ({
+    mood: 'happy',
+    lead: T('col_borrow_lead', { t0: info.a10, t: info.a10 - 1, x: info.a1, o: info.a1 + 10 }),
+    text: T('col_ones_now', { expr: colInfo().onesExpr }),
+    buttons: info.a1 > 0 ? [{ label: T('btn_split10', { r: info.a1 }), onClick: () => startGuided(null, 'w_split10'), ic: 'blocks', k: 'split10' }] : [],
+  }));
   if (!act(M.tradeDown, { noAdvance: true })) update();
 }
 
@@ -995,7 +1002,9 @@ function columnWrong(col, v, info) {
   if (col === 'ones') {
     text = p.op === '-' && info.borrow && !info.borrowed && v === info.b1 - info.a1
       ? T('col_sub_reverse', { x: info.a1, y: info.b1, t: info.a10 })
-      : T('col_check_ones', { expr: info.onesExpr });
+      : p.op === '-' && info.borrowed && info.a1 > 0
+        ? T('col_split10_hint', { o: info.a1 + 10, y: info.b1, r: info.a1 })
+        : T('col_check_ones', { expr: info.onesExpr });
   } else if (p.op === '+' && info.carry && v === info.a10 + info.b10) {
     text = T('col_forgot_carry', { v, t: info.a10, u: info.b10 });
   } else if (p.op === '-' && info.borrow && v === info.a10 - info.b10) {
@@ -1010,7 +1019,9 @@ function columnWrong(col, v, info) {
     text,
     buttons: [
       { label: T('tryAgain'), onClick: tryAgain, primary: true, k: 'try' },
-      { label: T('helpSteps'), onClick: startGuided, ic: 'help', k: 'steps' },
+      col === 'ones' && p.op === '-' && info.borrowed && info.a1 > 0
+        ? { label: T('btn_split10', { r: info.a1 }), onClick: () => startGuided(null, 'w_split10'), ic: 'blocks', k: 'split10' }
+        : { label: T('helpSteps'), onClick: startGuided, ic: 'help', k: 'steps' },
     ],
   }));
   update();
@@ -1027,7 +1038,7 @@ function words(params = {}) {
   return out;
 }
 
-function startGuided(lead) {
+function startGuided(lead, fromKey) {
   if (!play || play.status === 'solved' || play.status === 'guided') return;
   const c = data.active.current;
   c.helped = true;
@@ -1052,6 +1063,12 @@ function startGuided(lead) {
   clearCells();
   play.status = 'guided';
   play.guided = { steps: buildSteps(play.p), i: 0, wrongs: 0, startTrades: 0, lead: typeof lead === 'string' ? lead : null };
+  const from = fromKey ? play.guided.steps.findIndex((x) => x.key === fromKey) : -1;
+  if (from > 0) {
+    // the earlier steps already happened: replay their blocks moves quietly
+    for (let j = 0; j < from; j++) if (play.guided.steps[j].sync) M.applyAction(play.model, play.guided.steps[j].sync);
+    play.guided.i = from;
+  }
   enterStep();
 }
 
@@ -1064,7 +1081,7 @@ function stepBubble() {
   let lead = g.lead;
   let text = T(st.key, params);
   if ((st.kind === 'ask' || st.kind === 'write') && g.wrongs > 0) {
-    if (g.wrongs === 1) lead = T('g_count');
+    if (g.wrongs === 1) lead = st.hint ? T(st.hint, params) : T('g_count');
     else text = T('w_tell', { n: st.expect });
   }
   const buttons = [];
@@ -1549,16 +1566,31 @@ function matPanel() {
   const ones = m.pieces.filter((x) => x.kind === 'one' && x.state !== 'tray');
   let on = 0;
   const frames = [];
-  const nFrames = Math.max(1, Math.ceil(ones.length / 10));
-  for (let f = 0; f < nFrames; f++) {
-    const chunk = ones.slice(f * 10, f * 10 + 10);
+  const splitTen = m.op === '-' && m.trades > 0;
+  let chunks = [];
+  if (splitTen) {
+    // 17 = the yellow 10 + 7: the borrowed ten stays together in its own row
+    const tr = ones.filter((x) => x.src === 'trade');
+    const rest = ones.filter((x) => x.src !== 'trade');
+    chunks = [tr];
+    for (let i = 0; i < Math.max(1, rest.length); i += 10) chunks.push(rest.slice(i, i + 10));
+  } else {
+    for (let i = 0; i < Math.max(1, ones.length); i += 10) chunks.push(ones.slice(i, i + 10));
+  }
+  chunks.forEach((chunk, f) => {
     const full = chunk.length === 10 && chunk.every((x) => x.state === 'in');
     const slots = chunk.map((x) => pieceEl(x, x.state === 'in' ? ++on : null));
     for (let i = chunk.length; i < 10; i++) slots.push(h('span', { class: 'rm-slot', 'aria-hidden': 'true' }));
-    const fr = h('div', { class: `rm-frame ${full && m.op === '+' ? 'full' : ''}` }, slots);
+    const fr = h('div', { class: `rm-frame ${full && m.op === '+' ? 'full' : ''} ${splitTen && f === 0 ? 'ten' : ''}` }, slots);
     if (full && m.op === '+' && f === 0) enableDrag(fr, 'frame');
-    frames.push(fr);
-  }
+    if (splitTen) {
+      const left = chunk.filter((x) => x.state === 'in').length;
+      frames.push(h('div', { class: 'rm-frame-wrap' }, fr, h('span', { class: `rm-frame-cap ${f === 0 ? 'ten' : ''}` }, String(left))));
+      if (f === 0) frames.push(h('span', { class: 'rm-frame-plus', 'aria-hidden': 'true' }, '+'));
+    } else {
+      frames.push(fr);
+    }
+  });
 
   const tW = W().tens(c.tensIn), oW = W().ones(c.onesIn);
   const trayFull = c.tensTray + c.onesTray === tensOf(p.b) + onesOf(p.b) && m.op === '+';

@@ -181,7 +181,17 @@ export function buildSteps(p) {
       steps.push({ kind: 'borrow', key: 'w_borrow', params: { t: a10 }, focus: 'tens', sync: 'tradeDown' });
       steps.push({ kind: 'next', key: 'w_borrow_after', params: { t0: a10, t: tensNow, x: a1, o: onesNow, a: p.a } });
     }
-    steps.push({ kind: 'write', cell: 'ones', expect: onesLeft, key: 'w_sub_ones', params: { x: onesNow, y: b1 }, focus: 'ones', sync: b1 > 0 ? 'takeOnes' : null });
+    if (borrow) {
+      // 17 − 8 is hard to do in her head. 17 is the yellow 10 and 7:
+      // take the 8 from the 10 (a friend of 10), then put what is left with the 7.
+      const fromTen = 10 - b1;
+      if (a1 > 0) steps.push({ kind: 'next', key: 'w_split10', params: { o: onesNow, r: a1 }, focus: 'ones', split10: true });
+      steps.push({ kind: 'ask', ask: 'fromTen', expect: fromTen, key: 'w_from_ten', params: { y: b1 }, label: `10 \u2212 ${b1}`, hint: 'w_from_ten_hint', focus: 'ones', sync: 'takeFromTen' });
+      if (a1 > 0) steps.push({ kind: 'ask', ask: 'join', expect: fromTen + a1, key: 'w_join', params: { x: fromTen, y: a1 }, label: `${fromTen} + ${a1}`, hint: 'w_join_hint', focus: 'ones' });
+      steps.push({ kind: 'write', cell: 'ones', expect: onesLeft, key: 'w_write_result', params: { o0: onesNow, y: b1, o: onesLeft }, focus: 'ones' });
+    } else {
+      steps.push({ kind: 'write', cell: 'ones', expect: onesLeft, key: 'w_sub_ones', params: { x: onesNow, y: b1 }, focus: 'ones', sync: b1 > 0 ? 'takeOnes' : null });
+    }
     if (tensLeft > 0) {
       steps.push({ kind: 'write', cell: 'tens', expect: tensLeft, key: 'w_sub_tens', params: { x: tensNow, y: b10 }, focus: 'tens', sync: 'takeTens', final: true });
     } else {

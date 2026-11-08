@@ -2,7 +2,7 @@
 // Every piece is a ten (rod) or a one (cube).
 //   src:   'a' (first number), 'b' (second number), 'trade' (made by a trade)
 //   state: 'in' (on the mat), 'tray' (waiting to be added), 'gone' (taken away)
-import { tensOf, onesOf } from './math.js?v=6';
+import { tensOf, onesOf } from './math.js?v=7';
 
 export function makeModel(p) {
   const m = { op: p.op, a: p.a, b: p.b, pieces: [], trades: 0, nextId: 1 };
@@ -97,6 +97,15 @@ export function takeOne(m, kind, id) {
   piece.state = 'gone';
   return true;
 }
+// 17 − 8: take the 8 from the borrowed ten (10 − 8 = 2), leaving the 7 alone.
+export function takeFromTen(m) {
+  let n = 0;
+  for (const x of m.pieces) {
+    if (takeLeft(m).ones === 0) break;
+    if (x.kind === 'one' && x.src === 'trade' && x.state === 'in') { x.state = 'gone'; n++; }
+  }
+  return n;
+}
 export function takeAll(m, kind) {
   let n = 0;
   while (takeOne(m, kind)) n++;
@@ -115,6 +124,7 @@ export function applyAction(m, act) {
     case 'tradeUp': return tradeUp(m);
     case 'tradeDown': return tradeDown(m);
     case 'takeOnes': return takeAll(m, 'one') > 0;
+    case 'takeFromTen': return takeFromTen(m) > 0;
     case 'takeTens': return takeAll(m, 'ten') > 0;
     default: return false;
   }

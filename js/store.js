@@ -1,6 +1,6 @@
 // Saved data lives only in this browser (localStorage). Every access is
 // wrapped so the app still works when storage is blocked.
-import { NEXT_SKILL, BASE_SKILL, MAX_LEVEL } from './math.js?v=6';
+import { NEXT_SKILL, BASE_SKILL, MAX_LEVEL } from './math.js?v=7';
 
 const KEY = 'mila-rainbow-math-v1';
 

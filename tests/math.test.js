@@ -73,7 +73,10 @@ function walk(p) {
       }
     }
     const c = M.counts(m);
-    if (st.kind === 'ask') assert.equal(st.expect, c.onesIn, `${p.key} ones sum shown in blocks`);
+    if (st.kind === 'ask' && st.ask === 'fromTen') {
+      const yellowLeft = m.pieces.filter((x) => x.kind === 'one' && x.src === 'trade' && x.state === 'in').length;
+      assert.equal(st.expect, yellowLeft, `${p.key} 10 - ${st.params.y} left in the yellow ten`);
+    } else if (st.kind === 'ask') assert.equal(st.expect, c.onesIn, `${p.key} ones shown in blocks`);
     if (st.key === 'w_split') { assert.equal(Math.floor(st.params.s / 10), 1); assert.equal(st.params.s, c.onesIn); }
     if (st.key === 'w_borrow_after') { assert.equal(c.tensIn, st.params.t); assert.equal(c.onesIn, st.params.o); assert.equal(M.value(m), p.a); }
     if (st.kind === 'write') {
@@ -114,12 +117,20 @@ test('39 + 12: 9 + 2 = 11, the 1 goes up on top of the 3, then 1 + 3 + 1', () =>
   assert.equal(st[4].expect, 5);
 });
 
-test('42 - 17: borrow from the 4, 12 - 7 = 5, 3 - 1 = 2', () => {
+test('42 - 17: borrow from the 4, then 12 - 7 as (10 - 7) + 2', () => {
   const st = buildSteps({ a: 42, b: 17, op: '-', answer: 25, regroup: true });
-  assert.deepEqual(st.map((x) => x.key), ['w_sub_cant', 'w_borrow', 'w_borrow_after', 'w_sub_ones', 'w_sub_tens']);
+  assert.deepEqual(st.map((x) => x.key), ['w_sub_cant', 'w_borrow', 'w_borrow_after', 'w_split10', 'w_from_ten', 'w_join', 'w_write_result', 'w_sub_tens']);
   assert.deepEqual([st[2].params.t, st[2].params.o, st[2].params.a], [3, 12, 42]);
-  assert.equal(st[3].expect, 5);
-  assert.equal(st[4].expect, 2);
+  assert.deepEqual(st.filter((x) => x.expect != null).map((x) => x.expect), [3, 5, 5, 2]);
+});
+
+test('37 - 18: 17 is 10 and 7, 10 - 8 = 2, 2 + 7 = 9, then 2 - 1 = 1', () => {
+  const st = buildSteps({ a: 37, b: 18, op: '-', answer: 19, regroup: true });
+  assert.deepEqual(st.find((x) => x.key === 'w_split10').params, { o: 17, r: 7 });
+  assert.equal(st.find((x) => x.ask === 'fromTen').label, '10 \u2212 8');
+  assert.deepEqual(st.filter((x) => x.expect != null).map((x) => x.expect), [2, 9, 9, 1]);
+  const zero = buildSteps({ a: 40, b: 18, op: '-', answer: 22, regroup: true }).map((x) => x.key);
+  assert.ok(!zero.includes('w_split10') && !zero.includes('w_join'), '40 - 18: just 10 - 8');
 });
 
 test('no regrouping: write the ones, then the tens', () => {

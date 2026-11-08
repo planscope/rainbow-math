@@ -596,3 +596,11 @@ button.rm-split-t.tap { min-width: 48px; height: 48px; cursor: pointer; box-shad
   .rm-group { min-width: 130px; padding: 12px 14px 8px; }
   .rm-group.row { padding: 8px 14px; }
 }
+
+/* ---------------------------------------------------------------- v6: 17 = 10 + 7 */
+.rm-frame-wrap { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.rm-frame.ten { border-style: solid; border-color: #f2c94c; background: #fffbea; }
+.rm-frame-cap { font-size: 20px; font-weight: 700; color: var(--a); min-width: 34px; text-align: center; border-radius: 999px; background: #f1ebff; padding: 0 8px; }
+.rm-frame-cap.ten { color: #8a5a00; background: #fff3bf; }
+.rm-frame-plus { font-size: 22px; font-weight: 700; color: var(--muted); line-height: 1; }
+.rm-col.ones .rm-col-b { gap: 4px; }
