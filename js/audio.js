@@ -6,18 +6,38 @@ let enabled = true;
 
 export function setSound(on) { enabled = !!on; }
 
+// iPad/iPhone: tell Safari this is real sound to play (like music), so it is heard
+// even when the device is on silent. (Safari 16.4+; older ones ignore it.)
+function playbackSession() {
+  try { if (navigator.audioSession && navigator.audioSession.type !== 'playback') navigator.audioSession.type = 'playback'; } catch (e) { /* ignore */ }
+}
+
 function audio() {
   if (!ctx) {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return null;
+    playbackSession();
     try { ctx = new AC(); } catch (e) { return null; }
   }
-  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+  if (ctx.state !== 'running' && ctx.state !== 'closed') ctx.resume().catch(() => {});
   return ctx;
 }
 
-// Call from any tap so iPad Safari allows sound later.
-export function unlockAudio() { if (enabled) audio(); }
+// Call from real taps (touchend / click): iPad Safari only wakes sound up then.
+// Playing a tiny silent sound inside the tap is what really unlocks it.
+export function unlockAudio() {
+  if (!enabled) return;
+  const c = audio();
+  if (!c || c.__unlocked) return;
+  try {
+    const b = c.createBuffer(1, 1, 22050);
+    const s = c.createBufferSource();
+    s.buffer = b;
+    s.connect(c.destination);
+    s.start(0);
+    if (c.state === 'running') c.__unlocked = true;
+  } catch (e) { /* ignore */ }
+}
 export const audioCtx = () => (enabled ? audio() : null);
 
 function tone(freq, start, dur, type = 'sine', vol = 0.12) {

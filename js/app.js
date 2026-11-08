@@ -1,14 +1,14 @@
 // Mila's Rainbow Math Adventure: screens and interaction.
-import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js?v=12';
-import * as M from './model.js?v=12';
-import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=12';
-import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL } from './levels.js?v=12';
-import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=12';
-import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=12';
-import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults, loadPlayers, savePlayers, addPlayer, removePlayer, pinHash } from './store.js?v=12';
-import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking as stopDeviceSpeech, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=12';
-import { playLine, stopClips, preloadLines } from './voice.js?v=12';
-import { lineText } from './voicelines.js?v=12';
+import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js?v=13';
+import * as M from './model.js?v=13';
+import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=13';
+import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL } from './levels.js?v=13';
+import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=13';
+import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=13';
+import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults, loadPlayers, savePlayers, addPlayer, removePlayer, pinHash } from './store.js?v=13';
+import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking as stopDeviceSpeech, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=13';
+import { playLine, stopClips, preloadLines, unlockMedia } from './voice.js?v=13';
+import { lineText } from './voicelines.js?v=13';
 const stopSpeaking = () => { stopDeviceSpeech(); stopClips(); };
 
 // ---------------------------------------------------------------- setup
@@ -2347,5 +2347,7 @@ function onKey(e) {
 document.addEventListener('keydown', onKey);
 onVoicesChanged(() => { if (screen === 'parent') update(); });
 if (reduceMQ && reduceMQ.addEventListener) reduceMQ.addEventListener('change', applyMotion);
-document.addEventListener('pointerdown', () => unlockAudio(), { once: true });
+// iPad Safari wakes sound only on real taps (touchend / click), so listen to those every time.
+const wakeSound = () => { unlockAudio(); unlockMedia(); };
+['touchend', 'click', 'keydown'].forEach((ev) => document.addEventListener(ev, wakeSound, { capture: true, passive: true }));
 render();
