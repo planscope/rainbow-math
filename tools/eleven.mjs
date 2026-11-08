@@ -10,12 +10,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { allClips } from '../js/voice.js';
+import { allLines } from '../js/voicelines.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const AUDIO = path.join(ROOT, 'audio');
 const API = 'https://api.elevenlabs.io';
-const MODEL = 'eleven_turbo_v2_5';
+const MODEL = 'eleven_v3'; // the most expressive model: understands [excited], [giggles], [whispers]
 
 function key() {
   const f = path.join(os.homedir(), '.config', 'elevenlabs', 'api_key');
@@ -41,7 +41,7 @@ async function api(method, url, body, binary = false) {
 }
 
 // A bright, playful, friendly read.
-const SETTINGS = { stability: 0.38, similarity_boost: 0.8, style: 0.55, use_speaker_boost: true, speed: 0.95 };
+const SETTINGS = { stability: 0.5 };
 
 async function tts(voiceId, text, lang) {
   return api('POST', `/v1/text-to-speech/${voiceId}?output_format=mp3_44100_64`, {
@@ -92,7 +92,7 @@ async function sample(voiceId, name) {
 
 async function generate(voiceId, name = '') {
   fs.mkdirSync(AUDIO, { recursive: true });
-  const all = allClips();
+  const all = allLines();
   const ids = Object.keys(all);
   const todo = ids.filter((id) => !fs.existsSync(path.join(AUDIO, `${id}.mp3`)));
   const chars = todo.reduce((n, id) => n + all[id].text.length, 0);
