@@ -62,3 +62,7 @@ The page is unlisted, not private: anyone with the link can open it.
   in the tests.
 - Every finished problem earns a rainbow piece, with or without help. Every
   finished adventure brings a new friend to the island. Nothing is ever taken away.
+
+## Updating
+
+After changing code, bump the `?v=` number on the imports in `js/*.js` (all files the same) so iPads never mix old and new files, then push. The Webflow page picks up changes within 10 minutes; no Webflow publish is needed.

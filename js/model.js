@@ -2,7 +2,7 @@
 // Every piece is a ten (rod) or a one (cube).
 //   src:   'a' (first number), 'b' (second number), 'trade' (made by a trade)
 //   state: 'in' (on the mat), 'tray' (waiting to be added), 'gone' (taken away)
-import { tensOf, onesOf } from './math.js';
+import { tensOf, onesOf } from './math.js?v=3';
 
 export function makeModel(p) {
   const m = { op: p.op, a: p.a, b: p.b, pieces: [], trades: 0, nextId: 1 };

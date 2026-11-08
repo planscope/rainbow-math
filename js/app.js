@@ -1,10 +1,10 @@
 // Mila's Rainbow Math Adventure: screens and interaction.
-import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js';
-import * as M from './model.js';
+import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js?v=3';
+import * as M from './model.js?v=3';
 import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js';
-import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG } from './art.js';
-import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults } from './store.js';
-import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking, canSpeak, listVoices, onVoicesChanged } from './audio.js';
+import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG } from './art.js?v=3';
+import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults } from './store.js?v=3';
+import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=3';
 
 // ---------------------------------------------------------------- setup
 function mount() {
