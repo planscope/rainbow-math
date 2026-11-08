@@ -1,12 +1,14 @@
 // Mila's Rainbow Math Adventure: screens and interaction.
-import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js?v=8';
-import * as M from './model.js?v=8';
-import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=8';
-import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL } from './levels.js?v=8';
-import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=8';
-import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=8';
-import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults } from './store.js?v=8';
-import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=8';
+import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js?v=9';
+import * as M from './model.js?v=9';
+import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=9';
+import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL } from './levels.js?v=9';
+import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=9';
+import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=9';
+import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults } from './store.js?v=9';
+import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking as stopDeviceSpeech, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=9';
+import { clipsFor, playClips, stopClips } from './voice.js?v=9';
+const stopSpeaking = () => { stopDeviceSpeech(); stopClips(); };
 
 // ---------------------------------------------------------------- setup
 function mount() {
@@ -145,25 +147,36 @@ function computeCoach() {
     else if (st.kind === 'write') c = { target: `[data-k="cell-${st.cell}"]`, short: T('c_write_s'), side: 'below' };
     else if (st.kind === 'ask') c = { target: '.rm-entry', short: T('c_type_s'), side: 'left' };
     else c = { target: '[data-k="g-next"]', short: T('c_ok_s'), side: 'below' };
-    Object.assign(c, { n, say: `${T('coachStep', { n })}. ${said}`, key: `g${play.guided.i}` });
+    const vkey = st.key === 'w_split' ? (st.params.o === 1 ? 'w_split1_v' : 'w_split_v') : st.key;
+    Object.assign(c, { n, say: `${T('coachStep', { n })}. ${said}`, key: `g${play.guided.i}`, voice: [{ key: 'coachStep', params: { n } }, { key: vkey, params: st.params }] });
   } else if (isMul()) {
     const k = play.mulCounted;
     c = k < p.a
-      ? { n: 1, target: `[data-k="grp-${k}"]`, short: T('c_group_s'), say: T('c_group_v', { n: 1, b: p.b }), side: 'above', key: 'm1' }
-      : { n: 2, target: '.rm-entry', short: T('c_type_s'), say: T('c_mul_type_v', { n: 2 }), side: 'left', key: 'm2' };
+      ? { n: 1, target: `[data-k="grp-${k}"]`, short: T('c_group_s'), line: ['c_group_v', { n: 1, b: p.b }], side: 'above', key: 'm1' }
+      : { n: 2, target: '.rm-entry', short: T('c_type_s'), line: ['c_mul_type_v', { n: 2 }], side: 'left', key: 'm2' };
   } else {
     const info = colInfo();
     const col = phaseCell();
     const needBorrow = p.op === '-' && info.borrow;
     if (col === 'ones' && needBorrow && !info.borrowed) {
-      c = { n: 1, target: '[data-k="borrow-digit"]', short: T('c_borrow_s', { t: info.a10 }), say: T('c_borrow_v', { n: 1, x: info.a1, y: info.b1, t: info.a10 }), side: 'above', key: 'b1', focus: 'ones' };
+      c = { n: 1, target: '[data-k="borrow-digit"]', short: T('c_borrow_s', { t: info.a10 }), line: ['c_borrow_v', { n: 1, x: info.a1, y: info.b1, t: info.a10 }], side: 'above', key: 'b1', focus: 'ones' };
     } else if (col === 'ones') {
       const n = needBorrow ? 2 : 1;
-      c = { n, target: '[data-k="cell-ones"]', short: T('c_box_s', { expr: info.onesExpr }), say: T('c_ones_v', { n, expr: info.onesExpr }), side: 'below', key: `o${n}` };
+      const line = p.op === '+'
+        ? ['c_ones_add_v', { n, x: info.a1, y: info.b1 }]
+        : ['c_ones_sub_v', { n, x: info.borrowed ? info.a1 + 10 : info.a1, y: info.b1 }];
+      c = { n, target: '[data-k="cell-ones"]', short: T('c_box_s', { expr: info.onesExpr }), line, side: 'below', key: `o${n}` };
     } else {
       const n = needBorrow ? 3 : 2;
-      c = { n, target: '[data-k="cell-tens"]', short: T('c_box_s', { expr: info.tensExpr }), say: T('c_tens_v', { n, expr: info.tensExpr }), side: 'below', key: `t${n}` };
+      const line = p.op === '+'
+        ? [info.carry ? 'c_tens_carry_v' : 'c_tens_add_v', { n, x: info.a10, y: info.b10 }]
+        : ['c_tens_sub_v', { n, x: info.a10 - info.borrow, y: info.b10 }];
+      c = { n, target: '[data-k="cell-tens"]', short: T('c_box_s', { expr: info.tensExpr }), line, side: 'below', key: `t${n}` };
     }
+  }
+  if (c.line) {
+    c.say = T(c.line[0], c.line[1]);
+    c.voice = [{ key: c.line[0], params: c.line[1] }];
   }
   play.coach = c;
   play.coachFocus = c.focus || null;
@@ -209,7 +222,13 @@ function speakCoach() {
   const c = play && play.coach;
   if (!c || c.key === play.coachSpoken) return;
   play.coachSpoken = c.key;
-  if (coachTalks()) speak(c.say, L(), { pitch: 1.6, rate: 1.0 }); // a bright, cartoon voice
+  if (!coachTalks()) return;
+  const lang = L();
+  const device = () => speak(c.say, lang, { pitch: 1.6, rate: 1.0 }); // bright device voice
+  const ids = data.settings.coachVoiceKind !== 'device' && c.voice ? clipsFor(lang, c.voice) : null;
+  if (!ids) { device(); return; }
+  // the recorded cartoon voice; if a clip is missing, the device voice says it instead
+  playClips(ids).then((ok) => { if (!ok && play && play.coachSpoken === c.key && screen === 'play') device(); });
 }
 root.addEventListener('scroll', () => { if (screen === 'play') positionCoach(); }, { passive: true });
 const update = render;
@@ -1870,6 +1889,7 @@ function viewParent() {
       seg(T('p_autoRead'), st.autoRead, [[true, T('p_on')], [false, T('p_off')]], (v) => { st.autoRead = v; }),
       seg(T('p_coach'), st.coach !== false, [[true, T('p_on')], [false, T('p_off')]], (v) => { st.coach = v; }),
       seg(T('p_coachVoice'), st.coachVoice !== false, [[true, T('p_on')], [false, T('p_off')]], (v) => { st.coachVoice = v; }),
+      seg(T('p_coachVoiceKind'), st.coachVoiceKind === 'device' ? 'device' : 'cartoon', [['cartoon', T('p_vk_cartoon')], ['device', T('p_vk_device')]], (v) => { st.coachVoiceKind = v; }),
       voiceField(),
       seg(T('p_motion'), st.motion, [['auto', T('p_motionAuto')], ['reduce', T('p_motionReduce')]], (v) => { st.motion = v; })),
     h('section', { class: 'rm-card rm-p-sec' },

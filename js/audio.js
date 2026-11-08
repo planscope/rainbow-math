@@ -18,6 +18,7 @@ function audio() {
 
 // Call from any tap so iPad Safari allows sound later.
 export function unlockAudio() { if (enabled) audio(); }
+export const audioCtx = () => (enabled ? audio() : null);
 
 function tone(freq, start, dur, type = 'sine', vol = 0.12) {
   const c = audio();
@@ -95,7 +96,7 @@ function pickVoice(lang, wanted) {
 }
 
 // Read math out loud as words, not symbols.
-function speakable(text, lang) {
+export function speakable(text, lang) {
   const es = lang === 'es';
   return text
     .replace(/\s*−\s*/g, es ? ' menos ' : ' minus ')

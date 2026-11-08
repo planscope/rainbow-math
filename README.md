@@ -68,3 +68,18 @@ The page is unlisted, not private: anyone with the link can open it.
 ## Updating
 
 After changing code, bump the `?v=` number on the imports in `js/*.js` (all files the same) so iPads never mix old and new files, then push. The Webflow page picks up changes within 10 minutes; no Webflow publish is needed.
+
+## The guide friend's voice (ElevenLabs, recorded once)
+
+The guide friend speaks with short clips recorded with ElevenLabs (voice: Gigi) in
+`audio/`, joined together in the app (`js/voice.js`). The app never calls ElevenLabs
+and holds no key; if a clip is missing it uses the device voice.
+
+After changing any line the guide says (keys listed in `VOICE_KEYS` in `js/voice.js`),
+record the missing clips (needs the key in `~/.config/elevenlabs/api_key`):
+
+```bash
+node tools/eleven.mjs generate jBpfuIE2acCO8z3wKNLl Gigi
+```
+
+`node tools/preview-lines.mjs` joins a few sentences into `samples/` to listen to.
