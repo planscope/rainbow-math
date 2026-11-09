@@ -1,14 +1,14 @@
 // Mila's Rainbow Math Adventure: screens and interaction.
-import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js?v=18';
-import * as M from './model.js?v=18';
-import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=18';
-import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL } from './levels.js?v=18';
-import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=18';
-import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=18';
-import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults, loadPlayers, savePlayers, addPlayer, removePlayer, pinHash } from './store.js?v=18';
-import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking as stopDeviceSpeech, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=18';
-import { playLine, playExplain, playSequence, stopClips, preloadLines, unlockMedia, voiceInfo, voiceNames } from './voice.js?v=18';
-import { lineText, explainFor, readSequence } from './voicelines.js?v=18';
+import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js?v=19';
+import * as M from './model.js?v=19';
+import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=19';
+import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL } from './levels.js?v=19';
+import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=19';
+import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=19';
+import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults, loadPlayers, savePlayers, addPlayer, removePlayer, pinHash } from './store.js?v=19';
+import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking as stopDeviceSpeech, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=19';
+import { playLine, playExplain, playSequence, stopClips, preloadLines, unlockMedia, voiceInfo, voiceNames } from './voice.js?v=19';
+import { lineText, explainFor, readSequence } from './voicelines.js?v=19';
 const stopSpeaking = () => { stopDeviceSpeech(); stopClips(); };
 
 // ---------------------------------------------------------------- setup
@@ -165,6 +165,9 @@ function computeCoach() {
     if (st.kind === 'carry') c = { target: '[data-k="carry-chip"]', short: T('c_carry_s'), side: 'above' };
     else if (st.kind === 'borrow') c = { target: '[data-k="borrow-digit"]', short: T('c_borrow_s', { t: tensOf(p.a) }), side: 'above' };
     else if (st.kind === 'write') c = { target: `[data-k="cell-${st.cell}"]`, short: T('c_write_s'), side: 'below' };
+    else if (ADD_SYNC.includes(st.sync) && !play.guided.synced && addProgress(st).left > 0) {
+      c = { target: '.rm-tray', short: T('c_add_s', { n: addProgress(st).left }), side: 'above' };
+    }
     else if (REMOVE_SYNC.includes(st.sync) && !play.guided.synced) {
       const rp = removeProgress(st);
       const tgt = st.sync === 'takeTens' ? '.rm-col.tens .rm-col-b' : st.sync === 'takeFromTen' ? '.rm-frame.ten' : '.rm-col.ones .rm-col-b';
@@ -1557,7 +1560,7 @@ function stepBubble() {
   let lead = g.lead;
   let text = T(st.key, params);
   if ((st.kind === 'ask' || st.kind === 'write') && g.wrongs > 0) {
-    if (g.wrongs === 1) lead = REMOVE_SYNC.includes(st.sync) && !g.synced ? T('g_tapTake') : st.hint ? T(st.hint, params) : T('g_count');
+    if (g.wrongs === 1) lead = REMOVE_SYNC.includes(st.sync) && !g.synced ? T('g_tapTake') : ADD_SYNC.includes(st.sync) && !g.synced ? T('g_tapAdd') : st.hint ? T(st.hint, params) : T('g_count');
     else text = T('w_tell', { n: st.expect });
   }
   const buttons = [];
@@ -1630,7 +1633,7 @@ function submitGuided(n) {
   comfort();
   sfx.soft();
   if (g.wrongs === 1) {
-    if (!REMOVE_SYNC.includes(st.sync)) syncStep(st);
+    if (!REMOVE_SYNC.includes(st.sync) && !ADD_SYNC.includes(st.sync)) syncStep(st);
     play.counting = true;
     play.countedEver = true;
   }
@@ -1927,12 +1930,41 @@ function blockMode() {
   return st && st.kind === 'carry' ? 'tradeUp' : st && st.kind === 'borrow' ? 'tradeDown' : 'none';
 }
 
-function onTray() {
-  const mode = blockMode();
-  if (mode === 'explore') act((m) => { if (!M.canBringOnes(m) && !M.canBringTens(m)) return false; M.bringOnes(m); M.bringTens(m); return true; });
-  else if (mode === 'bringOnes' || mode === 'bringTens') act((m) => M.applyAction(m, mode));
-  else if (helpBlocksMove(['bringOnes', 'bringTens'])) { /* done */ }
-  else guidedWait();
+// Adding: every tap brings ONE waiting block onto the mat (ones first), so Mila
+// adds them herself and the board never does the adding for her.
+function onTray(x) {
+  const m = play.model;
+  if (play.status === 'guided') {
+    const st = curStep();
+    if (st && ADD_SYNC.includes(st.sync) && !play.guided.synced) { addOneForStep(st, x); return; }
+    guidedWait();
+    return;
+  }
+  const kind = x ? x.kind : M.canBringOnes(m) ? 'one' : 'ten';
+  act((mm) => M.bringOne(mm, kind, x ? x.id : null));
+}
+
+const ADD_SYNC = ['bringOnes', 'bringTens'];
+function addProgress(st) {
+  const m = play.model;
+  const total = st.sync === 'bringTens' ? tensOf(m.b) : onesOf(m.b);
+  const c = M.counts(m);
+  const left = st.sync === 'bringTens' ? c.tensTray : c.onesTray;
+  return { total, done: total - left, left };
+}
+function addOneForStep(st, x) {
+  const want = st.sync === 'bringTens' ? 'ten' : 'one';
+  if (x && x.kind !== want) { toast(T(want === 'one' ? 'addOnesFirst' : 'addTensNow')); sfx.soft(); return; }
+  play.counting = false;
+  act((mm) => M.bringOne(mm, want, x ? x.id : null), { noAdvance: true });
+  if (addProgress(st).left === 0) {
+    play.guided.synced = true;
+    play.counting = true; // now count them together
+    play.countedEver = true;
+    sfx.reward();
+    toast(T('addedAllCount'));
+    update();
+  }
 }
 
 // During help, tapping the blocks does this step's move (bring in the ones, take away...)
@@ -1981,7 +2013,11 @@ function onPiece(x) {
     const st = curStep();
     if (st && REMOVE_SYNC.includes(st.sync) && !play.guided.synced) { takeOneForStep(st, x); return; }
   }
-  if (m.op === '+') { sfx.tap(); return; }
+  if (m.op === '+') {
+    if (x.kind === 'one' && x.state === 'in' && M.canTradeUp(m) && (mode === 'explore' || mode === 'tradeUp')) { act(M.tradeUp); return; }
+    sfx.tap();
+    return;
+  }
   if (x.state !== 'in') return;
   if (x.kind === 'one') {
     if (mode === 'explore' || mode === 'takeOnes') {
@@ -2119,7 +2155,8 @@ function matPanel() {
     if (full && m.op === '+' && f === 0) enableDrag(fr, 'frame');
     if (splitTen) {
       const left = chunk.filter((x) => x.state === 'in').length;
-      frames.push(h('div', { class: 'rm-frame-wrap' }, fr, h('span', { class: `rm-frame-cap ${f === 0 ? 'ten' : ''}` }, String(left))));
+      const cap = c.onesGone === 0 || play.status === 'solved' ? h('span', { class: `rm-frame-cap ${f === 0 ? 'ten' : ''}` }, String(left)) : null;
+      frames.push(h('div', { class: 'rm-frame-wrap' }, fr, cap));
       if (f === 0) frames.push(h('span', { class: 'rm-frame-plus', 'aria-hidden': 'true' }, '+'));
     } else {
       frames.push(fr);
@@ -2129,9 +2166,11 @@ function matPanel() {
   const tW = W().tens(c.tensIn), oW = W().ones(c.onesIn);
   const trayFull = c.tensTray + c.onesTray === tensOf(p.b) + onesOf(p.b) && m.op === '+';
   const nothingTaken = c.tensGone + c.onesGone === 0;
-  const showTotal = play.status === 'solved' || (m.op === '-' ? nothingTaken : trayFull && m.trades === 0);
-  let line = showTotal ? T('matIsN', { t: tW, o: oW, n: M.value(m) }) : T('matIs', { t: tW, o: oW });
-  if (m.op === '-' && m.trades > 0 && nothingTaken) line += ` ${T('stillN', { n: p.a })}`;
+  const solved = play.status === 'solved';
+  const untouched = m.op === '-' ? nothingTaken : trayFull && m.trades === 0;
+  let line = solved || untouched ? T('matIsN', { t: tW, o: oW, n: M.value(m) }) : null;
+  if (m.op === '-' && m.trades > 0 && nothingTaken && !solved) line += ` ${T('stillN', { n: p.a })}`;
+  const showN = solved || untouched;
 
   let hint = null;
   if (guided) {
@@ -2139,11 +2178,15 @@ function matPanel() {
     if (gst && REMOVE_SYNC.includes(gst.sync)) {
       const rp = removeProgress(gst);
       hint = rp.left ? T('takenOf', { k: rp.done, n: rp.total }) : T('takenAllCount');
+    } else if (gst && ADD_SYNC.includes(gst.sync) && !play.guided.synced) {
+      const ap = addProgress(gst);
+      hint = ap.left ? T(gst.sync === 'bringTens' ? 'addedTensOf' : 'addedOf', { k: ap.done, n: ap.total }) : null;
     }
   }
   if (!guided && play.status !== 'solved') {
     if (m.op === '+') {
       if (c.onesIn >= 10) hint = T('tooManyOnes');
+      else if (c.tensTray + c.onesTray > 0) hint = T('tapToAdd');
       else if (m.trades > 0) hint = T('carriedHint');
     } else {
       const left = M.takeLeft(m);
@@ -2158,11 +2201,16 @@ function matPanel() {
   if (m.op === '+' && c.tensTray + c.onesTray > 0) {
     const tp = m.pieces.filter((x) => x.state === 'tray');
     const what = [c.tensTray ? W().tens(c.tensTray) : null, c.onesTray ? W().ones(c.onesTray) : null].filter(Boolean).join(' + ');
-    tray = h('button', { type: 'button', class: 'rm-tray', 'data-k': 'tray', 'aria-label': T('trayLabel', { b: what }), onclick: tapGuard(onTray) },
-      h('span', { class: 'rm-tray-sum' }, `+ ${M.counts(m).tensTray * 10 + M.counts(m).onesTray}`),
-      h('span', { class: 'rm-tray-p' }, tp.map((x) => h('span', { class: `rm-mini ${x.kind === 'one' ? 'one' : 'rod'} src-b` }))),
+    tray = h('div', { class: 'rm-tray', 'data-k': 'tray', role: 'group', 'aria-label': T('trayLabel', { b: what }) },
+      h('span', { class: 'rm-tray-sum' }, '+'),
+      h('span', { class: 'rm-tray-p' }, tp.map((x) => h('button', {
+        type: 'button',
+        class: `rm-mini ${x.kind === 'one' ? 'one' : 'rod'} src-b`,
+        'data-k': `tp-${x.id}`,
+        'aria-label': x.kind === 'one' ? W().ones(1) : W().tens(1),
+        onclick: tapGuard(() => onTray(x)),
+      }))),
       h('span', { class: 'rm-tray-l' }, T('trayTip')));
-    enableDrag(tray, 'tray');
   }
 
   const explore = [];
@@ -2170,8 +2218,6 @@ function matPanel() {
   if (!guided && play.status !== 'solved') {
     explore.push(button(T('matStart'), () => { if (play.status === 'ask') restartColumns(); else play.model = M.makeModel(p); sfx.tap(); update(); }, { cls: 'small soft', ic: 'reset', k: 'mat-reset' }));
     if (m.op === '+') {
-      explore.push(button(T('addOnes'), () => act((mm) => M.applyAction(mm, 'bringOnes')), { cls: 'small', k: 'x-ones', disabled: !M.canBringOnes(m) }));
-      explore.push(button(T('addTens'), () => act((mm) => M.applyAction(mm, 'bringTens')), { cls: 'small', k: 'x-tens', disabled: !M.canBringTens(m) }));
       explore.push(button(T('tradeUp'), () => act(M.tradeUp), { cls: `small ${M.canTradeUp(m) ? 'gold' : ''}`, k: 'x-tradeup', disabled: !M.canTradeUp(m) }));
     } else {
       explore.push(button(T('tradeDown'), () => act(M.tradeDown), { cls: `small ${M.canTradeDown(m) ? 'gold' : ''}`, k: 'x-tradedown', disabled: !M.canTradeDown(m) }));
@@ -2182,13 +2228,13 @@ function matPanel() {
   return h('div', { class: 'rm-card rm-blocks' },
     h('div', { class: 'rm-mat' },
       h('div', { class: `rm-col tens ${fc === 'tens' ? 'focus' : ''}`, 'data-drop': 'tens' },
-        h('div', { class: 'rm-col-h' }, h('span', null, T('tensCol')), h('b', { class: 'rm-col-n' }, String(c.tensIn))),
+        h('div', { class: 'rm-col-h' }, h('span', null, T('tensCol')), showN ? h('b', { class: 'rm-col-n' }, String(c.tensIn)) : null),
         h('div', { class: 'rm-col-b' }, tens)),
       h('div', { class: `rm-col ones ${fc === 'ones' ? 'focus' : ''}`, 'data-drop': 'ones' },
-        h('div', { class: 'rm-col-h' }, h('span', null, T('onesCol')), h('b', { class: 'rm-col-n' }, String(c.onesIn))),
+        h('div', { class: 'rm-col-h' }, h('span', null, T('onesCol')), showN ? h('b', { class: 'rm-col-n' }, String(c.onesIn)) : null),
         h('div', { class: 'rm-col-b' }, frames))),
     tray,
-    h('p', { class: 'rm-mat-line', 'aria-live': 'polite' }, line),
+    line ? h('p', { class: 'rm-mat-line', 'aria-live': 'polite' }, line) : null,
     hint ? h('p', { class: 'rm-mat-hint' }, hint) : null,
     explore.length ? h('div', { class: 'rm-mat-actions' }, explore) : null);
 }
@@ -2436,7 +2482,7 @@ function voiceCheck() {
     h('div', { class: 'rm-field-l' }, T('vc_title')),
     h('p', { class: 'rm-small' }, T('vc_voice', { lang: lang === 'es' ? 'Español' : 'English', who: (voiceNamesCache && voiceNamesCache[lang]) || '\u2026' })),
     h('p', { class: 'rm-small' }, `${T('vc_last')}: ${last}`),
-    h('p', { class: 'rm-small' }, `iPad: ${vi.ios ? T('p_on') : T('p_off')} \u00b7 ${T('p_sound')}: ${data.settings.sound ? T('p_on') : T('p_off')} \u00b7 v18${vi.unlockError ? ` \u00b7 unlock: ${vi.unlockError}` : ''}${vi.mediaError ? ` \u00b7 player: ${vi.mediaError}` : ''}`),
+    h('p', { class: 'rm-small' }, `iPad: ${vi.ios ? T('p_on') : T('p_off')} \u00b7 ${T('p_sound')}: ${data.settings.sound ? T('p_on') : T('p_off')} \u00b7 v19${vi.unlockError ? ` \u00b7 unlock: ${vi.unlockError}` : ''}${vi.mediaError ? ` \u00b7 player: ${vi.mediaError}` : ''}`),
     button(T('vc_test'), () => { unlockMedia(); unlockAudio(); sayLine('hello'); setTimeout(() => { if (screen === 'parent') update(); }, 1200); }, { cls: 'small', ic: 'read', k: 'vc-test' }));
 }
 

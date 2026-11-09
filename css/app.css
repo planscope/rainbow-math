@@ -798,3 +798,24 @@ button.rm-split-t.tap { min-width: 48px; height: 48px; cursor: pointer; box-shad
   40% { transform: scale(1.5) rotate(15deg); opacity: 1; box-shadow: 0 0 0 8px rgba(255, 216, 77, .5); }
   100% { transform: scale(1); opacity: .7; box-shadow: 0 0 0 14px rgba(255, 216, 77, 0); }
 }
+
+/* ---------------- v10: add blocks one tap at a time */
+.rm .rm-tray { touch-action: manipulation; }
+.rm .rm-tray-p { gap: 8px; align-items: flex-end; justify-content: center; }
+.rm .rm-tray button.rm-mini {
+  padding: 0; min-width: 0; min-height: 0; box-shadow: 0 3px 0 rgba(43, 33, 64, .18);
+  border: 2px solid rgba(43, 33, 64, .25); background: var(--pc-b);
+  transition: transform .12s ease;
+  animation: rm-wiggle 2.4s ease-in-out infinite;
+}
+.rm .rm-tray button.rm-mini.one { width: 34px; height: 34px; border-radius: 9px; }
+.rm .rm-tray button.rm-mini.rod {
+  width: 22px; height: 76px; border-radius: 7px;
+  background: repeating-linear-gradient(to bottom, var(--pc-b) 0 6px, rgba(255, 255, 255, .7) 6px 7.6px);
+}
+.rm .rm-tray button.rm-mini:active { transform: scale(.85); }
+.rm .rm-tray button.rm-mini:nth-child(2n) { animation-delay: .3s; }
+.rm .rm-tray button.rm-mini:nth-child(3n) { animation-delay: .6s; }
+@keyframes rm-wiggle { 0%, 88%, 100% { transform: rotate(0); } 92% { transform: rotate(-6deg); } 96% { transform: rotate(6deg); } }
+@media (prefers-reduced-motion: reduce) { .rm .rm-tray button.rm-mini { animation: none; } }
+.rm-reduce .rm-tray button.rm-mini { animation: none; }

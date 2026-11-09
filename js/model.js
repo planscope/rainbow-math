@@ -2,7 +2,7 @@
 // Every piece is a ten (rod) or a one (cube).
 //   src:   'a' (first number), 'b' (second number), 'trade' (made by a trade)
 //   state: 'in' (on the mat), 'tray' (waiting to be added), 'gone' (taken away)
-import { tensOf, onesOf } from './math.js?v=18';
+import { tensOf, onesOf } from './math.js?v=19';
 
 export function makeModel(p) {
   const m = { op: p.op, a: p.a, b: p.b, pieces: [], trades: 0, nextId: 1 };
@@ -44,6 +44,14 @@ export function bringOnes(m) {
 }
 export function bringTens(m) {
   m.pieces.forEach((x) => { if (x.kind === 'ten' && x.state === 'tray') x.state = 'in'; });
+}
+// One tap = one piece: brings the next waiting piece of that kind onto the mat.
+export function bringOne(m, kind, id) {
+  const piece = (id != null && m.pieces.find((x) => x.id === id && x.state === 'tray'))
+    || m.pieces.find((x) => x.kind === kind && x.state === 'tray');
+  if (!piece) return false;
+  piece.state = 'in';
+  return true;
 }
 export const canTradeUp = (m) => m.op === '+' && counts(m).onesIn >= 10;
 export function tradeUp(m) {
