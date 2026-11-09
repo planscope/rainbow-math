@@ -176,8 +176,8 @@ export function allLines() {
 // her screen ("Nine plus two... how many is that?"). Each explanation is recorded whole,
 // once per number combination that can really happen (found from the step builder).
 // Only the numbers a line needs are used, so there are about 430 English recordings.
-import { buildSteps } from './math.js?v=19';
-import { buildMulSteps } from './mult.js?v=19';
+import { buildSteps } from './math.js?v=20';
+import { buildMulSteps } from './mult.js?v=20';
 
 export const EXPLAIN = {
   x_ones_sum: { from: 'w_ones_sum', params: ['x', 'y'], en: "[curious] Let's add the ones. {x} plus {y}... how many is that?" },
@@ -227,12 +227,14 @@ export function explainText(lang, key, params, forVoice = false) {
 export function allExplanations(lang = 'en') {
   const out = {};
   const addStep = (st) => {
-    const key = FROM[st.key];
-    if (!key || !EXPLAIN[key][lang]) return;
-    const params = {};
-    for (const p of EXPLAIN[key].params) params[p] = st.params[p];
-    const id = explainId(lang, key, params);
-    if (!out[id]) out[id] = { lang, key, params, text: explainText(lang, key, params, true) };
+    for (const sk of [st.key, ...(st.say || [])]) {
+      const key = FROM[sk];
+      if (!key || !EXPLAIN[key][lang]) continue;
+      const params = {};
+      for (const p of EXPLAIN[key].params) params[p] = st.params[p];
+      const id = explainId(lang, key, params);
+      if (!out[id]) out[id] = { lang, key, params, text: explainText(lang, key, params, true) };
+    }
   };
   for (let a = 10; a <= 99; a++) {
     for (let b = 10; b <= 99; b++) {
@@ -247,7 +249,7 @@ export function allExplanations(lang = 'en') {
 // ---------------------------------------------------------------- "Read to me" (English)
 // Problems and stories have different numbers every time, so "Read to me" joins short
 // recordings: the story pieces between the numbers, the numbers 0-100, and "What is ... plus ...?".
-import { STORIES } from './i18n.js?v=19';
+import { STORIES } from './i18n.js?v=20';
 
 const OPN = { '+': 'add', '-': 'sub', '×': 'mul' };
 const READ_WORDS = {

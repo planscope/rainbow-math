@@ -77,13 +77,19 @@ function walk(p) {
       const yellowLeft = m.pieces.filter((x) => x.kind === 'one' && x.src === 'trade' && x.state === 'in').length;
       assert.equal(st.expect, yellowLeft, `${p.key} 10 - ${st.params.y} left in the yellow ten`);
     } else if (st.kind === 'ask') assert.equal(st.expect, c.onesIn, `${p.key} ones shown in blocks`);
-    if (st.key === 'w_split') { assert.equal(Math.floor(st.params.s / 10), 1); assert.equal(st.params.s, c.onesIn); }
-    if (st.key === 'w_borrow_after') { assert.equal(c.tensIn, st.params.t); assert.equal(c.onesIn, st.params.o); assert.equal(M.value(m), p.a); }
-    if (st.kind === 'write') {
+    if (st.say && st.say.includes('w_borrow_after')) { assert.equal(c.tensIn, st.params.t); assert.equal(st.params.o, st.params.x + 10); }
+    if (st.kind === 'write' && st.carryAuto) {
+      // 8 + 6 = 14 in the ones box: the 4 stays, the 1 ten goes up
+      assert.ok(st.expect >= 10 && st.expect <= 18, `${p.key} carry sum`);
+      assert.equal(st.expect, c.onesIn, `${p.key} ones shown in blocks`);
+      assert.ok(M.tradeUp(m));
+      boxes.ones = String(st.expect % 10);
+    } else if (st.kind === 'write') {
       assert.ok(st.expect >= 0 && st.expect <= 9, 'one digit per box');
       assert.equal(st.expect, st.cell === 'ones' ? c.onesIn : c.tensIn, `${p.key} ${st.cell} box matches blocks`);
       boxes[st.cell] = String(st.expect);
     }
+    assert.ok(st.kind !== 'next' || st.final, `${p.key} no extra OK screens`);
   }
   assert.equal(M.value(m), p.answer, `${p.key} blocks end at the answer`);
   assert.equal(Number(boxes.tens || 0) * 10 + Number(boxes.ones), p.answer, `${p.key} boxes read the answer`);
@@ -110,27 +116,32 @@ test('guided steps match the blocks for every problem', () => {
 
 test('39 + 12: 9 + 2 = 11, the 1 goes up on top of the 3, then 1 + 3 + 1', () => {
   const st = buildSteps({ a: 39, b: 12, op: '+', answer: 51, regroup: true });
-  assert.deepEqual(st.map((x) => x.key), ['w_ones_sum', 'w_split', 'w_carry_up', 'w_write_ones', 'w_tens_carry']);
+  assert.deepEqual(st.map((x) => x.key), ['w_ones_sum', 'w_tens_carry']);
   assert.equal(st[0].expect, 11);
-  assert.equal(st[2].params.t, 3);
-  assert.equal(st[3].expect, 1);
-  assert.equal(st[4].expect, 5);
+  assert.equal(st[0].cell, 'ones');
+  assert.ok(st[0].carryAuto, '11 goes in the ones box, the 1 flies up by itself');
+  assert.equal(st[1].params.t, 3);
+  assert.equal(st[1].expect, 5);
 });
 
 test('42 - 17: borrow from the 4, then 12 - 7 as (10 - 7) + 2', () => {
   const st = buildSteps({ a: 42, b: 17, op: '-', answer: 25, regroup: true });
-  assert.deepEqual(st.map((x) => x.key), ['w_sub_cant', 'w_borrow', 'w_borrow_after', 'w_split10', 'w_from_ten', 'w_join', 'w_write_result', 'w_sub_tens']);
-  assert.deepEqual([st[2].params.t, st[2].params.o, st[2].params.a], [3, 12, 42]);
-  assert.deepEqual(st.filter((x) => x.expect != null).map((x) => x.expect), [3, 5, 5, 2]);
+  assert.deepEqual(st.map((x) => x.key), ['w_borrow', 'w_from_ten', 'w_join', 'w_sub_tens']);
+  assert.deepEqual([st[1].params.t, st[1].params.o, st[1].params.a], [3, 12, 42]);
+  assert.deepEqual(st.filter((x) => x.expect != null).map((x) => x.expect), [3, 5, 2]);
+  assert.equal(st[2].cell, 'ones', '3 + 2 goes straight into the ones box');
 });
 
 test('37 - 18: 17 is 10 and 7, 10 - 8 = 2, 2 + 7 = 9, then 2 - 1 = 1', () => {
   const st = buildSteps({ a: 37, b: 18, op: '-', answer: 19, regroup: true });
-  assert.deepEqual(st.find((x) => x.key === 'w_split10').params, { o: 17, r: 7 });
+  const ft = st.find((x) => x.key === 'w_from_ten');
+  assert.deepEqual([ft.params.o, ft.params.r], [17, 7]);
+  assert.ok(ft.say.includes('w_split10'));
   assert.equal(st.find((x) => x.ask === 'fromTen').label, '10 \u2212 8');
-  assert.deepEqual(st.filter((x) => x.expect != null).map((x) => x.expect), [2, 9, 9, 1]);
-  const zero = buildSteps({ a: 40, b: 18, op: '-', answer: 22, regroup: true }).map((x) => x.key);
-  assert.ok(!zero.includes('w_split10') && !zero.includes('w_join'), '40 - 18: just 10 - 8');
+  assert.deepEqual(st.filter((x) => x.expect != null).map((x) => x.expect), [2, 9, 1]);
+  const zero = buildSteps({ a: 40, b: 18, op: '-', answer: 22, regroup: true });
+  assert.ok(!zero.some((x) => x.key === 'w_join'), '40 - 18: just 10 - 8');
+  assert.equal(zero.find((x) => x.key === 'w_from_ten').cell, 'ones', '10 - 8 = 2 goes in the ones box');
 });
 
 test('no regrouping: write the ones, then the tens', () => {

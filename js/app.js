@@ -1,14 +1,14 @@
 // Mila's Rainbow Math Adventure: screens and interaction.
-import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js?v=19';
-import * as M from './model.js?v=19';
-import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=19';
-import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL } from './levels.js?v=19';
-import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=19';
-import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=19';
-import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults, loadPlayers, savePlayers, addPlayer, removePlayer, pinHash } from './store.js?v=19';
-import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking as stopDeviceSpeech, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=19';
-import { playLine, playExplain, playSequence, stopClips, preloadLines, unlockMedia, voiceInfo, voiceNames } from './voice.js?v=19';
-import { lineText, explainFor, readSequence } from './voicelines.js?v=19';
+import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js?v=20';
+import * as M from './model.js?v=20';
+import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=20';
+import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL } from './levels.js?v=20';
+import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=20';
+import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=20';
+import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults, loadPlayers, savePlayers, addPlayer, removePlayer, pinHash } from './store.js?v=20';
+import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking as stopDeviceSpeech, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=20';
+import { playLine, playExplain, playSequence, playParts, stopClips, preloadLines, unlockMedia, voiceInfo, voiceNames } from './voice.js?v=20';
+import { lineText, explainFor, readSequence } from './voicelines.js?v=20';
 const stopSpeaking = () => { stopDeviceSpeech(); stopClips(); };
 
 // ---------------------------------------------------------------- setup
@@ -164,10 +164,10 @@ function computeCoach() {
     const said = [play.bubble && play.bubble.lead, play.bubble && play.bubble.text].filter(Boolean).join(' ');
     if (st.kind === 'carry') c = { target: '[data-k="carry-chip"]', short: T('c_carry_s'), side: 'above' };
     else if (st.kind === 'borrow') c = { target: '[data-k="borrow-digit"]', short: T('c_borrow_s', { t: tensOf(p.a) }), side: 'above' };
-    else if (st.kind === 'write') c = { target: `[data-k="cell-${st.cell}"]`, short: T('c_write_s'), side: 'below' };
     else if (ADD_SYNC.includes(st.sync) && !play.guided.synced && addProgress(st).left > 0) {
       c = { target: '.rm-tray', short: T('c_add_s', { n: addProgress(st).left }), side: 'above' };
     }
+    else if (st.kind === 'write') c = { target: `[data-k="cell-${st.cell}"]`, short: T('c_write_s'), side: 'below' };
     else if (REMOVE_SYNC.includes(st.sync) && !play.guided.synced) {
       const rp = removeProgress(st);
       const tgt = st.sync === 'takeTens' ? '.rm-col.tens .rm-col-b' : st.sync === 'takeFromTen' ? '.rm-frame.ten' : '.rm-col.ones .rm-col-b';
@@ -266,7 +266,14 @@ function sayStep(st, vline, still = () => true) {
   const lang = L();
   const ek = explainFor(st.key);
   const general = () => { if (vline && still()) sayLine(vline[0], vline[1], still, true); };
-  if (data.settings.coachVoiceKind === 'device' || !ek) { general(); return; }
+  if (data.settings.coachVoiceKind === 'device') { general(); return; }
+  if (st.say && st.say.length) {
+    const parts = st.say.map((k) => ({ explain: explainFor(k), params: st.params, line: GUIDED_LINE[k] }));
+    parts.push({ explain: ek, params: st.params, line: vline && vline[0], v: vline && vline[1] });
+    playParts(lang, parts).then((ok) => { if (!ok) general(); });
+    return;
+  }
+  if (!ek) { general(); return; }
   playExplain(lang, ek, st.params).then((ok) => { if (!ok) general(); else voiceInfo.last = { how: 'recording', via: 'explanation', key: ek }; });
 }
 
@@ -1235,7 +1242,9 @@ function press(d) {
   const st = curStep();
   if (play.status === 'guided' && (!st || (st.kind !== 'ask' && st.kind !== 'write'))) return;
   if (play.status === 'guided' && st.kind === 'write') {
-    play.cells[st.cell] = d;
+    if (play.splitting) return;
+    const cur = play.cells[st.cell];
+    play.cells[st.cell] = st.carryAuto && cur.length === 1 && cur !== '0' && !play.entryStale ? cur + d : d;
     play.activeCell = st.cell;
     play.entryStale = false;
     sfx.tap();
@@ -1461,7 +1470,7 @@ function borrowByTap() {
     mood: 'happy',
     lead: T('col_borrow_lead', { t0: info.a10, t: info.a10 - 1, x: info.a1, o: info.a1 + 10 }),
     text: T('col_ones_now', { expr: colInfo().onesExpr }),
-    buttons: info.a1 > 0 ? [{ label: T('btn_split10', { r: info.a1 }), onClick: () => startGuided(null, 'w_split10'), ic: 'blocks', k: 'split10' }] : [],
+    buttons: info.a1 > 0 ? [{ label: T('btn_split10', { r: info.a1 }), onClick: () => startGuided(null, 'w_from_ten'), ic: 'blocks', k: 'split10' }] : [],
   }));
   if (!act(M.tradeDown, { noAdvance: true })) update();
 }
@@ -1499,7 +1508,7 @@ function columnWrong(col, v, info) {
     buttons: [
       { label: T('tryAgain'), onClick: tryAgain, primary: true, k: 'try' },
       col === 'ones' && p.op === '-' && info.borrowed && info.a1 > 0
-        ? { label: T('btn_split10', { r: info.a1 }), onClick: () => startGuided(null, 'w_split10'), ic: 'blocks', k: 'split10' }
+        ? { label: T('btn_split10', { r: info.a1 }), onClick: () => startGuided(null, 'w_from_ten'), ic: 'blocks', k: 'split10' }
         : { label: T('helpSteps'), onClick: startGuided, ic: 'help', k: 'steps' },
     ],
   }));
@@ -1556,8 +1565,9 @@ function stepBubble() {
   const st = curStep();
   // paper-method texts talk about the written digits, so they keep plain numbers
   const params = st.key.startsWith('w_') || st.key.startsWith('m_') ? { ...st.params } : words(st.params);
-  if (st.key === 'w_split') params.ow = W().ones(st.params.o);
+  if (st.params.o != null) params.ow = W().ones(st.params.o);
   let lead = g.lead;
+  if (!lead && st.lead) lead = st.lead.map((k) => T(k, params)).join(' ');
   let text = T(st.key, params);
   if ((st.kind === 'ask' || st.kind === 'write') && g.wrongs > 0) {
     if (g.wrongs === 1) lead = REMOVE_SYNC.includes(st.sync) && !g.synced ? T('g_tapTake') : ADD_SYNC.includes(st.sync) && !g.synced ? T('g_tapAdd') : st.hint ? T(st.hint, params) : T('g_count');
@@ -1594,6 +1604,27 @@ function advanceStep() {
   enterStep();
 }
 
+// 8 + 6 = 14 typed in the ones box: the 4 stays, the 1 ten flies up on top of the tens.
+function guidedCarry(st, n) {
+  sfx.pop();
+  play.splitting = true;
+  play.cells.ones = String(n);
+  play.coach = null;
+  setBubble(() => ({ mood: 'cheer', text: T('col_split', { s: n, o: n % 10 }) }));
+  update();
+  setTimeout(() => {
+    if (!play || play.status !== 'guided' || curStep() !== st) return;
+    play.splitting = false;
+    play.cells.ones = String(n % 10);
+    const box = root.querySelector('[data-k="cell-ones"]');
+    play.carryFromBox = box ? box.getBoundingClientRect() : null;
+    play.guided.i += 1; // straight on to the tens: nothing to tap in between
+    enterStep();
+    if (!act(M.tradeUp, { noAdvance: true })) update();
+    flyCarryFromBox();
+  }, reduced() ? 300 : 1100);
+}
+
 // The blocks move that goes with a step (only once).
 function syncStep(st) {
   const g = play.guided;
@@ -1625,6 +1656,7 @@ function submitGuided(n) {
     play.entryStale = false;
     syncStep(st);
     if (st.final) return solve();
+    if (st.carryAuto) { guidedCarry(st, n); return; }
     sfx.pop();
     advanceStep();
     return;
@@ -2482,7 +2514,7 @@ function voiceCheck() {
     h('div', { class: 'rm-field-l' }, T('vc_title')),
     h('p', { class: 'rm-small' }, T('vc_voice', { lang: lang === 'es' ? 'Español' : 'English', who: (voiceNamesCache && voiceNamesCache[lang]) || '\u2026' })),
     h('p', { class: 'rm-small' }, `${T('vc_last')}: ${last}`),
-    h('p', { class: 'rm-small' }, `iPad: ${vi.ios ? T('p_on') : T('p_off')} \u00b7 ${T('p_sound')}: ${data.settings.sound ? T('p_on') : T('p_off')} \u00b7 v19${vi.unlockError ? ` \u00b7 unlock: ${vi.unlockError}` : ''}${vi.mediaError ? ` \u00b7 player: ${vi.mediaError}` : ''}`),
+    h('p', { class: 'rm-small' }, `iPad: ${vi.ios ? T('p_on') : T('p_off')} \u00b7 ${T('p_sound')}: ${data.settings.sound ? T('p_on') : T('p_off')} \u00b7 v20${vi.unlockError ? ` \u00b7 unlock: ${vi.unlockError}` : ''}${vi.mediaError ? ` \u00b7 player: ${vi.mediaError}` : ''}`),
     button(T('vc_test'), () => { unlockMedia(); unlockAudio(); sayLine('hello'); setTimeout(() => { if (screen === 'parent') update(); }, 1200); }, { cls: 'small', ic: 'read', k: 'vc-test' }));
 }
 

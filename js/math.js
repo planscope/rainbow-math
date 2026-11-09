@@ -152,6 +152,9 @@ export function analyzeAnswer(p, ans) {
 //   kind 'next'   -> look, then tap OK
 // `sync` is the blocks move that happens with the step, so the pictures
 // always show the same thing as the written numbers.
+// `lead` = what just happened (shown above the step, no extra OK screen),
+// `say`  = explanations the guide says before the step's own line.
+// `carryAuto`: she types 14 in the ones box; the 4 stays and the 1 flies up by itself.
 export function buildSteps(p) {
   const a10 = tensOf(p.a), a1 = onesOf(p.a), b10 = tensOf(p.b), b1 = onesOf(p.b);
   const steps = [];
@@ -161,11 +164,8 @@ export function buildSteps(p) {
     const o = s - 10 * carry;
     const tsum = a10 + b10 + carry;
     if (carry) {
-      steps.push({ kind: 'ask', ask: 'onesSum', expect: s, key: 'w_ones_sum', params: { x: a1, y: b1 }, focus: 'ones', sync: 'bringOnes' });
-      steps.push({ kind: 'next', key: 'w_split', params: { s, o }, focus: 'ones', split: true });
-      steps.push({ kind: 'carry', key: 'w_carry_up', params: { t: a10, s }, focus: 'tens', split: true, sync: 'tradeUp' });
-      steps.push({ kind: 'write', cell: 'ones', expect: o, key: 'w_write_ones', params: { o }, focus: 'ones' });
-      steps.push({ kind: 'write', cell: 'tens', expect: tsum, key: 'w_tens_carry', params: { t: a10, u: b10 }, focus: 'tens', sync: 'bringTens', final: true });
+      steps.push({ kind: 'write', cell: 'ones', expect: s, key: 'w_ones_sum', params: { x: a1, y: b1 }, focus: 'ones', sync: 'bringOnes', carryAuto: true });
+      steps.push({ kind: 'write', cell: 'tens', expect: tsum, key: 'w_tens_carry', params: { t: a10, u: b10, s, o }, lead: ['col_carry_lead'], say: ['w_split'], focus: 'tens', sync: 'bringTens', final: true });
     } else {
       steps.push({ kind: 'write', cell: 'ones', expect: o, key: 'w_ones_direct', params: { x: a1, y: b1 }, focus: 'ones', sync: b1 > 0 ? 'bringOnes' : null });
       steps.push({ kind: 'write', cell: 'tens', expect: tsum, key: 'w_tens', params: { t: a10, u: b10 }, focus: 'tens', sync: 'bringTens', final: true });
@@ -177,18 +177,19 @@ export function buildSteps(p) {
     const onesLeft = onesNow - b1;
     const tensLeft = tensNow - b10;
     if (borrow) {
-      steps.push({ kind: 'next', key: 'w_sub_cant', params: { x: a1, y: b1 }, focus: 'ones' });
-      steps.push({ kind: 'borrow', key: 'w_borrow', params: { t: a10 }, focus: 'tens', sync: 'tradeDown' });
-      steps.push({ kind: 'next', key: 'w_borrow_after', params: { t0: a10, t: tensNow, x: a1, o: onesNow, a: p.a } });
-    }
-    if (borrow) {
+      steps.push({ kind: 'borrow', key: 'w_borrow', params: { t: a10, x: a1, y: b1 }, lead: ['w_sub_cant'], say: ['w_sub_cant'], focus: 'tens', sync: 'tradeDown' });
       // 17 − 8 is hard to do in her head. 17 is the yellow 10 and 7:
       // take the 8 from the 10 (a friend of 10), then put what is left with the 7.
       const fromTen = 10 - b1;
-      if (a1 > 0) steps.push({ kind: 'next', key: 'w_split10', params: { o: onesNow, r: a1 }, focus: 'ones', split10: true });
-      steps.push({ kind: 'ask', ask: 'fromTen', expect: fromTen, key: 'w_from_ten', params: { y: b1 }, label: `10 \u2212 ${b1}`, hint: 'w_from_ten_hint', focus: 'ones', sync: 'takeFromTen' });
-      if (a1 > 0) steps.push({ kind: 'ask', ask: 'join', expect: fromTen + a1, key: 'w_join', params: { x: fromTen, y: a1 }, label: `${fromTen} + ${a1}`, hint: 'w_join_hint', focus: 'ones' });
-      steps.push({ kind: 'write', cell: 'ones', expect: onesLeft, key: 'w_write_result', params: { o0: onesNow, y: b1, o: onesLeft }, focus: 'ones' });
+      const pre = a1 > 0 ? ['w_borrow_after', 'w_split10'] : ['w_borrow_after'];
+      const ft = { key: 'w_from_ten', params: { y: b1, t0: a10, t: tensNow, x: a1, o: onesNow, a: p.a, r: a1 }, lead: pre, say: pre, hint: 'w_from_ten_hint', focus: 'ones', sync: 'takeFromTen', split10: a1 > 0 };
+      if (a1 > 0) {
+        steps.push({ ...ft, kind: 'ask', ask: 'fromTen', expect: fromTen, label: `10 \u2212 ${b1}` });
+        // what's left is the answer for the ones: it goes straight into the ones box
+        steps.push({ kind: 'write', cell: 'ones', expect: fromTen + a1, key: 'w_join', params: { x: fromTen, y: a1 }, hint: 'w_join_hint', focus: 'ones' });
+      } else {
+        steps.push({ ...ft, kind: 'write', cell: 'ones', expect: fromTen });
+      }
     } else {
       steps.push({ kind: 'write', cell: 'ones', expect: onesLeft, key: 'w_sub_ones', params: { x: onesNow, y: b1 }, focus: 'ones', sync: b1 > 0 ? 'takeOnes' : null });
     }

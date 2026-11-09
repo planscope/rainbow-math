@@ -2,8 +2,8 @@
 // tools/eleven.mjs). Each line is one whole recording, so it sounds natural.
 // The app never calls ElevenLabs. If a recording is missing it says false and
 // the app uses the device voice instead.
-import { audioCtx, audioCtxAny, stopSpeaking } from './audio.js?v=19';
-import { clipId, variants, explainId } from './voicelines.js?v=19';
+import { audioCtx, audioCtxAny, stopSpeaking } from './audio.js?v=20';
+import { clipId, variants, explainId } from './voicelines.js?v=20';
 
 // iPad/iPhone play the recordings with a regular audio player (the kind videos use):
 // it is not silenced by the mute switch the way Web Audio can be.
@@ -48,7 +48,7 @@ let token = 0;
 // Everyone waits for the same download (two lines asked at once both get the list).
 function loadManifest() {
   if (!manifestLoading) {
-    manifestLoading = fetch(new URL('../audio/manifest.json?v=19', import.meta.url))
+    manifestLoading = fetch(new URL('../audio/manifest.json?v=20', import.meta.url))
       .then((r) => (r.ok ? r.json() : null))
       .then((m) => { manifest = m; return m; })
       .catch(() => null); // no recordings: device voice is used
@@ -121,6 +121,28 @@ export async function playSequence(ids) {
   const m = await loadManifest();
   const files = m && m.clips ? ids.map((id) => m.clips[id]) : [];
   if (!files.length || files.some((f) => !f)) { voiceInfo.last = { how: 'device', key: 'read', reason: 'missing read pieces' }; return false; }
+  return playFiles(m, files, 'read');
+}
+
+// The guide says a few things in a row ("14 is one ten and 4..." then "Now the tens...").
+// Each piece is its explanation with real numbers if recorded, otherwise its general line;
+// a piece with no recording is skipped, but the last one has to play.
+export async function playParts(lang, parts) {
+  const m = await loadManifest();
+  if (!m || !m.clips) return false;
+  const files = [];
+  for (let i = 0; i < parts.length; i++) {
+    const pt = parts[i];
+    let f = null;
+    try { f = pt.explain ? m.clips[explainId(lang, pt.explain, pt.params)] : null; } catch (e) { f = null; }
+    if (!f && pt.line) f = pickTake(m, lang, pt.line, pt.v == null ? null : pt.v);
+    if (f) files.push(f);
+    else if (i === parts.length - 1) return false;
+  }
+  return playFiles(m, files, 'guide');
+}
+
+async function playFiles(m, files, label) {
   const my = ++token;
   const tag = m.generated ? `?g=${encodeURIComponent(m.generated)}` : '';
   const url = (f) => new URL(`../audio/${f}${tag}`, import.meta.url).href;
@@ -130,7 +152,7 @@ export async function playSequence(ids) {
     try {
       media.src = url(files[0]);
       await media.play();
-      voiceInfo.last = { how: 'recording', via: 'iPad player (read)', key: 'read' };
+      voiceInfo.last = { how: 'recording', via: `iPad player (${label})`, key: label };
       (async () => {
         for (let i = 1; i < files.length; i++) {
           await new Promise((res) => { media.onended = res; media.onpause = res; });
@@ -143,9 +165,9 @@ export async function playSequence(ids) {
     } catch (e) { voiceInfo.mediaError = e && e.name; }
   }
   const ctx = audioCtxAny();
-  if (!ctx) { voiceInfo.last = { how: 'device', key: 'read', reason: 'no Web Audio' }; return false; }
+  if (!ctx) { voiceInfo.last = { how: 'device', key: label, reason: 'no Web Audio' }; return false; }
   let bufs;
-  try { bufs = await Promise.all(files.map((f) => getBuffer(ctx, f))); } catch (e) { voiceInfo.last = { how: 'device', key: 'read', reason: `could not load (${e && e.message})` }; return false; }
+  try { bufs = await Promise.all(files.map((f) => getBuffer(ctx, f))); } catch (e) { voiceInfo.last = { how: 'device', key: label, reason: `could not load (${e && e.message})` }; return false; }
   if (my !== token) return true;
   let t = ctx.currentTime + 0.03;
   let last = null;
@@ -162,7 +184,7 @@ export async function playSequence(ids) {
   seqSources = [];
   current = { stop: () => { for (const x of mine) { try { x.stop(); } catch (e) { /* ignore */ } } } };
   void last;
-  voiceInfo.last = { how: 'recording', via: `Web Audio (read, ${ctx.state})`, key: 'read' };
+  voiceInfo.last = { how: 'recording', via: `Web Audio (${label}, ${ctx.state})`, key: label };
   return true;
 }
 let seqSources = [];
