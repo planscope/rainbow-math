@@ -1,6 +1,6 @@
 // Saved data lives only in this browser (localStorage). Every access is
 // wrapped so the app still works when storage is blocked.
-import { NEXT_SKILL, BASE_SKILL, MAX_LEVEL } from './math.js?v=16';
+import { NEXT_SKILL, BASE_SKILL, MAX_LEVEL } from './math.js?v=17';
 
 // Each player (Mila, and classmates who play on this device) has their own saved data.
 // Nothing leaves the device: no accounts, no server.

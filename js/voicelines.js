@@ -159,7 +159,7 @@ export const clipId = (lang, key, v = null, variant = 0) => `${lang}-${key}${v =
 
 // Every recording: { id: { lang, key, v, text } }
 export function allLines() {
-  const out = allExplanations('en');
+  const out = { ...allExplanations('en'), ...allReadPieces('en') };
   for (const lang of ['en', 'es']) {
     for (const [key, line] of Object.entries(LINES)) {
       const n = variants(lang, key).length;
@@ -176,8 +176,8 @@ export function allLines() {
 // her screen ("Nine plus two... how many is that?"). Each explanation is recorded whole,
 // once per number combination that can really happen (found from the step builder).
 // Only the numbers a line needs are used, so there are about 430 English recordings.
-import { buildSteps } from './math.js?v=16';
-import { buildMulSteps } from './mult.js?v=16';
+import { buildSteps } from './math.js?v=17';
+import { buildMulSteps } from './mult.js?v=17';
 
 export const EXPLAIN = {
   x_ones_sum: { from: 'w_ones_sum', params: ['x', 'y'], en: "[curious] Let's add the ones. {x} plus {y}... how many is that?" },
@@ -242,4 +242,59 @@ export function allExplanations(lang = 'en') {
   }
   for (let a = 2; a <= 5; a++) for (const b of [2, 3, 4, 5, 10]) buildMulSteps({ a, b, answer: a * b }).forEach(addStep);
   return out;
+}
+
+// ---------------------------------------------------------------- "Read to me" (English)
+// Problems and stories have different numbers every time, so "Read to me" joins short
+// recordings: the story pieces between the numbers, the numbers 0-100, and "What is ... plus ...?".
+import { STORIES } from './i18n.js?v=17';
+
+const OPN = { '+': 'add', '-': 'sub', '×': 'mul' };
+const READ_WORDS = {
+  what: { en: 'What is' },
+  plus: { en: 'plus' },
+  minus: { en: 'minus' },
+  times: { en: 'times' },
+};
+
+function storyParts(lang, op, i) {
+  const t = (STORIES[op][i] || {})[lang];
+  if (!t) return null;
+  return t.split(/(\{a\}|\{b\})/).map((x) => x.trim()).filter((x) => x);
+}
+
+export function allReadPieces(lang = 'en') {
+  const out = {};
+  for (let n = 0; n <= 100; n++) out[`${lang}-rd-n${n}`] = { lang, key: 'rd', text: enWords(n) };
+  for (const [k, w] of Object.entries(READ_WORDS)) out[`${lang}-rd-${k}`] = { lang, key: 'rd', text: w[lang] };
+  for (const op of Object.keys(OPN)) {
+    (STORIES[op] || []).forEach((_, i) => {
+      (storyParts(lang, op, i) || []).forEach((piece, j) => {
+        if (piece === '{a}' || piece === '{b}') return;
+        out[`${lang}-rd-${OPN[op]}${i}-${j}`] = { lang, key: 'rd', text: piece };
+      });
+    });
+  }
+  return out;
+}
+
+// The recordings for reading one problem (story first, if there is one), or null.
+export function readSequence(lang, p, storyIdx) {
+  if (lang !== 'en') return null;
+  const ids = [];
+  const num = (n) => (Number.isInteger(n) && n >= 0 && n <= 100 ? `${lang}-rd-n${n}` : null);
+  if (storyIdx != null) {
+    const op = p.op;
+    const list = STORIES[op] || [];
+    const i = storyIdx % list.length;
+    const parts = storyParts(lang, op, i);
+    if (!parts) return null;
+    parts.forEach((piece, j) => {
+      if (piece === '{a}') ids.push(num(p.a));
+      else if (piece === '{b}') ids.push(num(p.b));
+      else ids.push(`${lang}-rd-${OPN[op]}${i}-${j}`);
+    });
+  }
+  ids.push(`${lang}-rd-what`, num(p.a), `${lang}-rd-${p.op === '+' ? 'plus' : p.op === '-' ? 'minus' : 'times'}`, num(p.b));
+  return ids.includes(null) ? null : ids;
 }

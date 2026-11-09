@@ -1,14 +1,14 @@
 // Mila's Rainbow Math Adventure: screens and interaction.
-import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js?v=16';
-import * as M from './model.js?v=16';
-import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=16';
-import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL } from './levels.js?v=16';
-import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=16';
-import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=16';
-import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults, loadPlayers, savePlayers, addPlayer, removePlayer, pinHash } from './store.js?v=16';
-import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking as stopDeviceSpeech, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=16';
-import { playLine, playExplain, stopClips, preloadLines, unlockMedia, voiceInfo, voiceNames } from './voice.js?v=16';
-import { lineText, explainFor } from './voicelines.js?v=16';
+import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js?v=17';
+import * as M from './model.js?v=17';
+import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=17';
+import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL } from './levels.js?v=17';
+import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=17';
+import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=17';
+import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults, loadPlayers, savePlayers, addPlayer, removePlayer, pinHash } from './store.js?v=17';
+import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking as stopDeviceSpeech, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=17';
+import { playLine, playExplain, playSequence, stopClips, preloadLines, unlockMedia, voiceInfo, voiceNames } from './voice.js?v=17';
+import { lineText, explainFor, readSequence } from './voicelines.js?v=17';
 const stopSpeaking = () => { stopDeviceSpeech(); stopClips(); };
 
 // ---------------------------------------------------------------- setup
@@ -165,6 +165,11 @@ function computeCoach() {
     if (st.kind === 'carry') c = { target: '[data-k="carry-chip"]', short: T('c_carry_s'), side: 'above' };
     else if (st.kind === 'borrow') c = { target: '[data-k="borrow-digit"]', short: T('c_borrow_s', { t: tensOf(p.a) }), side: 'above' };
     else if (st.kind === 'write') c = { target: `[data-k="cell-${st.cell}"]`, short: T('c_write_s'), side: 'below' };
+    else if (REMOVE_SYNC.includes(st.sync) && !play.guided.synced) {
+      const rp = removeProgress(st);
+      const tgt = st.sync === 'takeTens' ? '.rm-col.tens .rm-col-b' : st.sync === 'takeFromTen' ? '.rm-frame.ten' : '.rm-col.ones .rm-col-b';
+      c = { target: tgt, short: T('c_take_s', { n: rp.left }), side: 'above' };
+    }
     else if (st.kind === 'ask') c = { target: '.rm-entry', short: T('c_type_s'), side: 'left' };
     else c = { target: '[data-k="g-next"]', short: T('c_ok_s'), side: 'below' };
     void said;
@@ -1116,7 +1121,7 @@ function writtenEl() {
   const cellsOn = usingCells() && play.status !== 'solved';
   const box = (txt, col, pen) => h('button', {
     type: 'button',
-    class: `rm-w-c ${col} rm-w-ans ${pen ? 'pencil' : ''} ${(play.entryStale || play.staleCell === col) && !pen ? 'stale' : ''} ${cellsOn && play.activeCell === col ? 'active' : ''} ${fc === col ? 'focus' : ''} ${String(txt).length === 2 ? 'two' : ''}`,
+    class: `rm-w-c ${col} rm-w-ans ${play.popKey && Date.now() - play.popKey < 120 && play.activeCell === col ? 'pop' : ''} ${pen ? 'pencil' : ''} ${(play.entryStale || play.staleCell === col) && !pen ? 'stale' : ''} ${cellsOn && play.activeCell === col ? 'active' : ''} ${fc === col ? 'focus' : ''} ${String(txt).length === 2 ? 'two' : ''}`,
     'data-k': `cell-${col}`,
     'aria-label': `${col === 'tens' ? T('tensCol') : T('onesCol')}: ${txt || '?'}`,
     disabled: !cellsOn,
@@ -1164,7 +1169,7 @@ function padEl() {
       ? button(last ? T('finish') : T('next'), goNext, { cls: 'primary big rm-next', ic: 'next', k: 'next' })
       : h('div', { class: 'rm-entry' },
         h('span', { class: 'rm-entry-l' }, label),
-        h('span', { class: `rm-entry-v ${play.entryStale ? 'stale' : ''}` }, shown || ' '),
+        h('span', { class: `rm-entry-v ${play.entryStale ? 'stale' : ''} ${play.popKey && Date.now() - play.popKey < 120 ? 'pop' : ''}` }, shown || ' '),
         tip ? h('span', { class: 'rm-entry-tip' }, tip) : null),
     h('div', { class: 'rm-keys' },
       [1, 2, 3, 4, 5, 6, 7, 8, 9].map(key),
@@ -1189,7 +1194,11 @@ function readProblem() {
   const parts = [];
   if (c.story != null) parts.push(storyText(L(), p, c.story));
   parts.push(T('whatIs', { a: p.a, b: p.b, opw: opWord(p.op) }));
-  readAloud(parts.join(' '));
+  const text = parts.join(' ');
+  // English: read with the recorded voice (joined pieces); otherwise the device voice
+  const ids = data.settings.sound && data.settings.coachVoiceKind !== 'device' ? readSequence(L(), p, c.story) : null;
+  if (!ids) { readAloud(text); return; }
+  playSequence(ids).then((ok) => { if (!ok) readAloud(text); });
 }
 
 function toggleBlocks() {
@@ -1203,8 +1212,22 @@ function toggleBlocks() {
 }
 
 // ---------------------------------------------------------------- keypad
+// A little burst of colored sparkles from the key, and the number bounces into its box.
+function keyBurst(d) {
+  if (reduced()) return;
+  const key = root.querySelector(`[data-k="key-${d}"]`);
+  if (!key) return;
+  const r = key.getBoundingClientRect();
+  const b = h('div', { class: 'rm-keyburst', 'aria-hidden': 'true', style: `left:${r.left + r.width / 2}px;top:${r.top + r.height / 2}px` },
+    Array.from({ length: 10 }, (_, i) => h('span', { style: `--a:${i * 36}deg;--c:${RAINBOW[i % RAINBOW.length]}` })));
+  root.append(b);
+  setTimeout(() => b.remove(), 650);
+}
+
 function press(d) {
   if (play.status === 'solved') return;
+  play.popKey = Date.now();
+  setTimeout(() => keyBurst(d), 0);
   const st = curStep();
   if (play.status === 'guided' && (!st || (st.kind !== 'ask' && st.kind !== 'write'))) return;
   if (play.status === 'guided' && st.kind === 'write') {
@@ -1533,7 +1556,7 @@ function stepBubble() {
   let lead = g.lead;
   let text = T(st.key, params);
   if ((st.kind === 'ask' || st.kind === 'write') && g.wrongs > 0) {
-    if (g.wrongs === 1) lead = st.hint ? T(st.hint, params) : T('g_count');
+    if (g.wrongs === 1) lead = REMOVE_SYNC.includes(st.sync) && !g.synced ? T('g_tapTake') : st.hint ? T(st.hint, params) : T('g_count');
     else text = T('w_tell', { n: st.expect });
   }
   const buttons = [];
@@ -1605,7 +1628,11 @@ function submitGuided(n) {
   g.wrongs++;
   comfort();
   sfx.soft();
-  if (g.wrongs === 1) { syncStep(st); play.counting = true; play.countedEver = true; }
+  if (g.wrongs === 1) {
+    if (!REMOVE_SYNC.includes(st.sync)) syncStep(st);
+    play.counting = true;
+    play.countedEver = true;
+  }
   if (st.kind === 'write') play.cells[st.cell] = '';
   else play.entryStale = true;
   setBubble(stepBubble);
@@ -1909,6 +1936,32 @@ function onTray() {
 
 // During help, tapping the blocks does this step's move (bring in the ones, take away...)
 // and numbers the pieces so she can count them.
+// Help steps that take blocks away: Mila taps each block herself (one tap = one block).
+const REMOVE_SYNC = ['takeOnes', 'takeFromTen', 'takeTens'];
+function removeProgress(st) {
+  const m = play.model;
+  const total = st.sync === 'takeTens' ? tensOf(m.b) : onesOf(m.b);
+  const left = st.sync === 'takeTens' ? M.takeLeft(m).tens : M.takeLeft(m).ones;
+  return { total, done: total - left, left };
+}
+function takeOneForStep(st, x) {
+  const m = play.model;
+  if (st.sync === 'takeTens' && x.kind !== 'ten') { toast(T('tapTens')); sfx.soft(); return; }
+  if (st.sync !== 'takeTens' && x.kind !== 'one') { toast(T('tapOnes')); sfx.soft(); return; }
+  if (st.sync === 'takeFromTen' && x.src !== 'trade') { toast(T('tapYellow')); sfx.soft(); return; }
+  if (!M.canTake(m, x.kind)) { toast(T('takenAll')); return; }
+  play.counting = false;
+  act((mm) => M.takeOne(mm, x.kind, x.id), { noAdvance: true });
+  if (removeProgress(st).left === 0) {
+    play.guided.synced = true;
+    play.counting = true; // now count what's left
+    play.countedEver = true;
+    sfx.reward();
+    toast(T('takenAllCount'));
+    update();
+  }
+}
+
 function helpBlocksMove(allowed) {
   if (!play || play.status !== 'guided') return false;
   const st = curStep();
@@ -1923,7 +1976,10 @@ function helpBlocksMove(allowed) {
 function onPiece(x) {
   const m = play.model;
   const mode = blockMode();
-  if (mode === 'none' && x.state === 'in' && helpBlocksMove(x.kind === 'one' ? ['takeOnes', 'takeFromTen'] : ['takeTens'])) return;
+  if (play.status === 'guided' && x.state === 'in') {
+    const st = curStep();
+    if (st && REMOVE_SYNC.includes(st.sync) && !play.guided.synced) { takeOneForStep(st, x); return; }
+  }
   if (m.op === '+') { sfx.tap(); return; }
   if (x.state !== 'in') return;
   if (x.kind === 'one') {
@@ -2025,7 +2081,7 @@ function pieceEl(x, n) {
     disabled: x.state === 'gone',
     'data-k': `pc-${x.id}`,
     onclick: tapGuard(() => onPiece(x)),
-  }, play.counting && n != null ? h('span', { class: 'rm-pc-n' }, String(isOne ? n : n * 10)) : null);
+  }, play.counting && n != null ? h('span', { class: 'rm-pc-n', style: `--i:${n}` }, String(isOne ? n : n * 10)) : null);
   if (!isOne && play.model.op === '-' && x.state === 'in') enableDrag(el, 'ten');
   return el;
 }
@@ -2077,6 +2133,13 @@ function matPanel() {
   if (m.op === '-' && m.trades > 0 && nothingTaken) line += ` ${T('stillN', { n: p.a })}`;
 
   let hint = null;
+  if (guided) {
+    const gst = curStep();
+    if (gst && REMOVE_SYNC.includes(gst.sync)) {
+      const rp = removeProgress(gst);
+      hint = rp.left ? T('takenOf', { k: rp.done, n: rp.total }) : T('takenAllCount');
+    }
+  }
   if (!guided && play.status !== 'solved') {
     if (m.op === '+') {
       if (c.onesIn >= 10) hint = T('tooManyOnes');
@@ -2102,7 +2165,7 @@ function matPanel() {
   }
 
   const explore = [];
-  explore.push(button(play.counting ? T('countOff') : T('countOn'), () => { play.counting = !play.counting; if (play.counting) play.countedEver = true; sfx.tap(); update(); }, { cls: 'small soft', ic: 'count', k: 'count', pressed: play.counting }));
+  explore.push(button(play.counting ? `${T('countOff')}` : `${T('countOn')}`, () => { play.counting = !play.counting; if (play.counting) play.countedEver = true; sfx.tap(); update(); }, { cls: `small count-btn ${play.counting ? 'on' : ''}`, ic: 'count', k: 'count', pressed: play.counting }));
   if (!guided && play.status !== 'solved') {
     explore.push(button(T('matStart'), () => { if (play.status === 'ask') restartColumns(); else play.model = M.makeModel(p); sfx.tap(); update(); }, { cls: 'small soft', ic: 'reset', k: 'mat-reset' }));
     if (m.op === '+') {
@@ -2372,7 +2435,7 @@ function voiceCheck() {
     h('div', { class: 'rm-field-l' }, T('vc_title')),
     h('p', { class: 'rm-small' }, T('vc_voice', { lang: lang === 'es' ? 'Español' : 'English', who: (voiceNamesCache && voiceNamesCache[lang]) || '\u2026' })),
     h('p', { class: 'rm-small' }, `${T('vc_last')}: ${last}`),
-    h('p', { class: 'rm-small' }, `iPad: ${vi.ios ? T('p_on') : T('p_off')} \u00b7 ${T('p_sound')}: ${data.settings.sound ? T('p_on') : T('p_off')} \u00b7 v16${vi.unlockError ? ` \u00b7 unlock: ${vi.unlockError}` : ''}${vi.mediaError ? ` \u00b7 player: ${vi.mediaError}` : ''}`),
+    h('p', { class: 'rm-small' }, `iPad: ${vi.ios ? T('p_on') : T('p_off')} \u00b7 ${T('p_sound')}: ${data.settings.sound ? T('p_on') : T('p_off')} \u00b7 v17${vi.unlockError ? ` \u00b7 unlock: ${vi.unlockError}` : ''}${vi.mediaError ? ` \u00b7 player: ${vi.mediaError}` : ''}`),
     button(T('vc_test'), () => { unlockMedia(); unlockAudio(); sayLine('hello'); setTimeout(() => { if (screen === 'parent') update(); }, 1200); }, { cls: 'small', ic: 'read', k: 'vc-test' }));
 }
 

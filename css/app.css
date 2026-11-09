@@ -761,3 +761,40 @@ button.rm-split-t.tap { min-width: 48px; height: 48px; cursor: pointer; box-shad
 .rm-foot { gap: 10px; flex-wrap: wrap; }
 .rm-welcome-scene { width: min(440px, 100%); }
 @media (max-height: 820px) { .rm-welcome-scene { width: min(380px, 100%); } }
+
+/* ---------------------------------------------------------------- v9: cartoon counting, sparkles, poof */
+.rm .rm-pc-n {
+  inset: auto; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  min-width: 22px; height: 22px; padding: 0 4px; border-radius: 999px;
+  background: #fff; border: 2.5px solid var(--pink); color: var(--ink);
+  font-family: 'Fredoka', ui-rounded, sans-serif; font-weight: 700; font-size: 13px; line-height: 17px; text-align: center;
+  box-shadow: 0 2px 0 rgba(139, 92, 255, .35);
+  animation: rm-count-pop .45s cubic-bezier(.3, 1.6, .5, 1) both; animation-delay: calc(var(--i) * 45ms);
+}
+.rm .rm-rod .rm-pc-n { top: 50%; bottom: auto; border-color: var(--violet); }
+@keyframes rm-count-pop { 0% { transform: translate(-50%, -50%) scale(0) rotate(-20deg); opacity: 0; } 100% { transform: translate(-50%, -50%) scale(1) rotate(0); opacity: 1; } }
+.rm .rm-btn.count-btn { background: linear-gradient(135deg, #fff6c9, #ffd1f3); border: 2px solid #ffb3e6; }
+.rm .rm-btn.count-btn.on { background: linear-gradient(135deg, var(--sun), #ff8fd8); color: #4a1a5e; border-color: transparent; box-shadow: 0 3px 0 #c2348f, 0 0 14px rgba(255, 79, 216, .45); }
+.rm .rm-btn.count-btn .rm-btn-ic { color: var(--pink); }
+
+/* sparkles from a keypad key */
+.rm-keyburst { position: fixed; width: 0; height: 0; z-index: 30; pointer-events: none; }
+.rm-keyburst span {
+  position: absolute; left: -5px; top: -5px; width: 10px; height: 10px; border-radius: 50%; background: var(--c);
+  animation: rm-spark .6s ease-out forwards;
+}
+.rm-keyburst span:nth-child(odd) { width: 8px; height: 8px; border-radius: 2px; }
+@keyframes rm-spark {
+  0% { transform: rotate(var(--a)) translateX(0) scale(1); opacity: 1; }
+  100% { transform: rotate(var(--a)) translateX(46px) scale(.3); opacity: 0; }
+}
+.rm .rm-w-ans.pop, .rm .rm-entry-v.pop { animation: rm-digit-pop .35s cubic-bezier(.3, 1.8, .5, 1); }
+@keyframes rm-digit-pop { 0% { transform: scale(.5); } 60% { transform: scale(1.25); } 100% { transform: scale(1); } }
+
+/* a block taken away goes "poof" */
+.rm .rm-pc.fresh-gone { animation: rm-poof .5s ease-out; }
+@keyframes rm-poof {
+  0% { transform: scale(1); background: var(--c); opacity: 1; box-shadow: 0 0 0 0 rgba(255, 216, 77, .9); }
+  40% { transform: scale(1.5) rotate(15deg); opacity: 1; box-shadow: 0 0 0 8px rgba(255, 216, 77, .5); }
+  100% { transform: scale(1); opacity: .7; box-shadow: 0 0 0 14px rgba(255, 216, 77, 0); }
+}

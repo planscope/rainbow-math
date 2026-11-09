@@ -251,7 +251,7 @@ test('every voice line has text, no child name, and unique recordings', () => {
   const ids = Object.keys(all);
   assert.equal(new Set(ids).size, ids.length);
   for (const id of ids) {
-    assert.ok(all[id].text.length > 5, id);
+    assert.ok(all[id].text.length >= 2, id);
     assert.ok(!/mila/i.test(all[id].text), `${id} must not say a name`);
     assert.ok(!/\{v\}/.test(all[id].text), `${id} filled in`);
   }

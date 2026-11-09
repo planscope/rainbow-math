@@ -2,8 +2,8 @@
 // tools/eleven.mjs). Each line is one whole recording, so it sounds natural.
 // The app never calls ElevenLabs. If a recording is missing it says false and
 // the app uses the device voice instead.
-import { audioCtx, stopSpeaking } from './audio.js?v=16';
-import { clipId, variants, explainId } from './voicelines.js?v=16';
+import { audioCtx, stopSpeaking } from './audio.js?v=17';
+import { clipId, variants, explainId } from './voicelines.js?v=17';
 
 // iPad/iPhone play the recordings with a regular audio player (the kind videos use):
 // it is not silenced by the mute switch the way Web Audio can be.
@@ -48,7 +48,7 @@ let token = 0;
 // Everyone waits for the same download (two lines asked at once both get the list).
 function loadManifest() {
   if (!manifestLoading) {
-    manifestLoading = fetch(new URL('../audio/manifest.json?v=16', import.meta.url))
+    manifestLoading = fetch(new URL('../audio/manifest.json?v=17', import.meta.url))
       .then((r) => (r.ok ? r.json() : null))
       .then((m) => { manifest = m; return m; })
       .catch(() => null); // no recordings: device voice is used
@@ -115,6 +115,57 @@ export async function playLine(lang, key, v = null) {
   const file = m && m.clips ? pickTake(m, lang, key, v) : null;
   return playFile(m, file, key);
 }
+
+// Plays several recordings one after another (used by "Read to me").
+export async function playSequence(ids) {
+  const m = await loadManifest();
+  const files = m && m.clips ? ids.map((id) => m.clips[id]) : [];
+  if (!files.length || files.some((f) => !f)) { voiceInfo.last = { how: 'device', key: 'read', reason: 'missing read pieces' }; return false; }
+  const my = ++token;
+  const tag = m.generated ? `?g=${encodeURIComponent(m.generated)}` : '';
+  const url = (f) => new URL(`../audio/${f}${tag}`, import.meta.url).href;
+  stopSpeaking();
+  if (current) { try { current.stop(); } catch (e) { /* ignore */ } current = null; }
+  if (IOS && media && media.__unlocked) {
+    try {
+      media.src = url(files[0]);
+      await media.play();
+      voiceInfo.last = { how: 'recording', via: 'iPad player (read)', key: 'read' };
+      (async () => {
+        for (let i = 1; i < files.length; i++) {
+          await new Promise((res) => { media.onended = res; media.onpause = res; });
+          if (my !== token) return;
+          media.src = url(files[i]);
+          try { await media.play(); } catch (e) { return; }
+        }
+      })();
+      return true;
+    } catch (e) { voiceInfo.mediaError = e && e.name; }
+  }
+  const ctx = audioCtx();
+  if (!ctx) return false;
+  let bufs;
+  try { bufs = await Promise.all(files.map((f) => getBuffer(ctx, f))); } catch (e) { return false; }
+  if (my !== token) return true;
+  let t = ctx.currentTime + 0.03;
+  let last = null;
+  for (const b of bufs) {
+    const src = ctx.createBufferSource();
+    src.buffer = b;
+    src.connect(ctx.destination);
+    src.start(t);
+    t += b.duration + 0.05;
+    last = src;
+    seqSources.push(src);
+  }
+  const mine = seqSources.slice();
+  seqSources = [];
+  current = { stop: () => { for (const x of mine) { try { x.stop(); } catch (e) { /* ignore */ } } } };
+  void last;
+  voiceInfo.last = { how: 'recording', via: `Web Audio (read, ${ctx.state})`, key: 'read' };
+  return true;
+}
+let seqSources = [];
 
 async function playFile(m, file, key) {
   const my = ++token;
