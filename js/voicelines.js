@@ -159,7 +159,7 @@ export const clipId = (lang, key, v = null, variant = 0) => `${lang}-${key}${v =
 
 // Every recording: { id: { lang, key, v, text } }
 export function allLines() {
-  const out = {};
+  const out = allExplanations('en');
   for (const lang of ['en', 'es']) {
     for (const [key, line] of Object.entries(LINES)) {
       const n = variants(lang, key).length;
@@ -168,5 +168,78 @@ export function allLines() {
       }
     }
   }
+  return out;
+}
+
+// ---------------------------------------------------------------- help that explains with the real numbers
+// When Mila taps "Help me", the guide explains each step out loud with the numbers on
+// her screen ("Nine plus two... how many is that?"). Each explanation is recorded whole,
+// once per number combination that can really happen (found from the step builder).
+// Only the numbers a line needs are used, so there are about 430 English recordings.
+import { buildSteps } from './math.js?v=16';
+import { buildMulSteps } from './mult.js?v=16';
+
+export const EXPLAIN = {
+  x_ones_sum: { from: 'w_ones_sum', params: ['x', 'y'], en: "[curious] Let's add the ones. {x} plus {y}... how many is that?" },
+  x_ones_direct: { from: 'w_ones_direct', params: ['x', 'y'], en: '[cheerful] First the ones! {x} plus {y}. Write the answer in the ones box!' },
+  x_split: { from: 'w_split', params: ['s', 'o'], en: '[excited] {s}! That is one ten, and {o} left over!' },
+  x_carry_up: { from: 'w_carry_up', params: ['t'], en: '[excited] The ten flies up on top of the {t}! Tap the yellow one!' },
+  x_write_ones: { from: 'w_write_ones', params: ['o'], en: '[cheerful] The {o} stays in the ones place. Write {o} in the ones box!' },
+  x_tens_carry: { from: 'w_tens_carry', params: ['t', 'u'], en: '[happy] Now the tens: one, plus {t}, plus {u}. How many tens?' },
+  x_tens: { from: 'w_tens', params: ['t', 'u'], en: '[happy] Now the tens: {t} plus {u}. Write it in the tens box!' },
+  x_sub_cant: { from: 'w_sub_cant', params: ['x', 'y'], en: "[curious] We have {x} ones, but we need to take away {y}. That's not enough!" },
+  x_borrow_after: { from: 'w_borrow_after', params: ['o'], en: '[amazed] One ten moved over to the ones. Now we have {o} ones!' },
+  x_split10: { from: 'w_split10', params: ['o', 'r'], en: "[cheerful] {o} is the yellow ten, and {r} more. Let's use the ten!" },
+  x_join: { from: 'w_join', params: ['x', 'y'], en: '[happy] Now put them together: {x} plus {y}. How many?' },
+  x_write_result: { from: 'w_write_result', params: ['o'], en: "[excited] That's {o}! Write {o} in the ones box." },
+  x_sub_ones: { from: 'w_sub_ones', params: ['x', 'y'], en: "[cheerful] Now the ones: {x} take away {y}. What's left?" },
+  x_sub_tens: { from: 'w_sub_tens', params: ['x', 'y'], en: '[happy] Now the tens: {x} take away {y}. Write it in the tens box!' },
+  x_m_intro: { from: 'm_intro', params: ['a', 'b'], en: "[cheerful] There are {a} groups, with {b} in each group. Let's add them up!" },
+  x_m_two: { from: 'm_two', params: ['y'], en: '[curious] One group has {y}. Two groups: {y} plus {y}. How many?' },
+  x_m_more: { from: 'm_more', params: ['k', 'x', 'y'], en: '[curious] {k} groups: {x} plus {y}. How many now?' },
+};
+const FROM = Object.fromEntries(Object.entries(EXPLAIN).map(([k, e]) => [e.from, k]));
+export const explainFor = (stepKey) => FROM[stepKey] || null;
+
+const EN_ONES = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve',
+  'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+const EN_TY = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+export function enWords(n) {
+  if (n < 20) return EN_ONES[n];
+  if (n === 100) return 'one hundred';
+  const t = Math.floor(n / 10), o = n % 10;
+  return o ? `${EN_TY[t]}-${EN_ONES[o]}` : EN_TY[t];
+}
+
+export const explainId = (lang, key, params) => `${lang}-${key}-${EXPLAIN[key].params.map((p) => params[p]).join('-')}`;
+
+export function explainText(lang, key, params, forVoice = false) {
+  const e = EXPLAIN[key];
+  const t = e && e[lang];
+  if (!t) return '';
+  let s = t.replace(/\{(\w+)\}/g, (_, p) => (forVoice ? enWords(params[p]) : String(params[p])));
+  if (forVoice) s = s.replace(/(^|[.!?]\s+|\]\s*)([a-z])/g, (m0, a, b) => a + b.toUpperCase()); // sentences start with a capital
+  if (!forVoice) s = s.replace(/\[[^\]]*\]\s*/g, '').trim();
+  return s;
+}
+
+// Every explanation recording: { id: { lang, key, params, text } } (English only for now).
+export function allExplanations(lang = 'en') {
+  const out = {};
+  const addStep = (st) => {
+    const key = FROM[st.key];
+    if (!key || !EXPLAIN[key][lang]) return;
+    const params = {};
+    for (const p of EXPLAIN[key].params) params[p] = st.params[p];
+    const id = explainId(lang, key, params);
+    if (!out[id]) out[id] = { lang, key, params, text: explainText(lang, key, params, true) };
+  };
+  for (let a = 10; a <= 99; a++) {
+    for (let b = 10; b <= 99; b++) {
+      if (a + b <= 99) buildSteps({ a, b, op: '+', answer: a + b }).forEach(addStep);
+      if (a - b >= 0) buildSteps({ a, b, op: '-', answer: a - b }).forEach(addStep);
+    }
+  }
+  for (let a = 2; a <= 5; a++) for (const b of [2, 3, 4, 5, 10]) buildMulSteps({ a, b, answer: a * b }).forEach(addStep);
   return out;
 }

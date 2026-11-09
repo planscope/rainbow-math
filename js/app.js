@@ -1,14 +1,14 @@
 // Mila's Rainbow Math Adventure: screens and interaction.
-import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js?v=15';
-import * as M from './model.js?v=15';
-import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=15';
-import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL } from './levels.js?v=15';
-import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=15';
-import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=15';
-import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults, loadPlayers, savePlayers, addPlayer, removePlayer, pinHash } from './store.js?v=15';
-import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking as stopDeviceSpeech, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=15';
-import { playLine, stopClips, preloadLines, unlockMedia, voiceInfo, voiceNames } from './voice.js?v=15';
-import { lineText } from './voicelines.js?v=15';
+import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js?v=16';
+import * as M from './model.js?v=16';
+import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=16';
+import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL } from './levels.js?v=16';
+import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=16';
+import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=16';
+import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults, loadPlayers, savePlayers, addPlayer, removePlayer, pinHash } from './store.js?v=16';
+import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking as stopDeviceSpeech, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=16';
+import { playLine, playExplain, stopClips, preloadLines, unlockMedia, voiceInfo, voiceNames } from './voice.js?v=16';
+import { lineText, explainFor } from './voicelines.js?v=16';
 const stopSpeaking = () => { stopDeviceSpeech(); stopClips(); };
 
 // ---------------------------------------------------------------- setup
@@ -170,7 +170,7 @@ function computeCoach() {
     void said;
     const lk = GUIDED_LINE[st.key] || (st.kind === 'next' ? 'g_next' : null);
     const lv = st.key === 'w_borrow' ? st.params.t : st.key === 'w_from_ten' ? st.params.y : null;
-    Object.assign(c, { n, key: `g${play.guided.i}`, vline: lk ? [lk, lv] : null });
+    Object.assign(c, { n, key: `g${play.guided.i}`, vline: lk ? [lk, lv] : null, step: st });
   } else if (isMul()) {
     const k = play.mulCounted;
     c = k < p.a
@@ -245,12 +245,38 @@ function speakCoach() {
   const c = play && play.coach;
   if (!c || c.key === play.coachSpoken) return;
   play.coachSpoken = c.key;
-  if (c.vline) sayLine(c.vline[0], c.vline[1], () => !!play && play.coachSpoken === c.key && screen === 'play');
+  const still = () => !!play && play.coachSpoken === c.key && screen === 'play';
+  if (c.step) sayStep(c.step, c.vline, still);
+  else if (c.vline) sayLine(c.vline[0], c.vline[1], still);
+}
+
+// Step-by-step help: the guide explains with the real numbers ("Nine plus two...").
+// If that recording is missing it says the general recorded line, and only then the device voice.
+function sayStep(st, vline, still = () => true) {
+  if (!coachTalks()) return;
+  if (play) play.lastSaid = { step: st, vline };
+  const lang = L();
+  const ek = explainFor(st.key);
+  const general = () => { if (vline && still()) sayLine(vline[0], vline[1], still, true); };
+  if (data.settings.coachVoiceKind === 'device' || !ek) { general(); return; }
+  playExplain(lang, ek, st.params).then((ok) => { if (!ok) general(); else voiceInfo.last = { how: 'recording', via: 'explanation', key: ek }; });
+}
+
+// The speaker in Lumi's bubble repeats what the guide said, in the same voice.
+function replayGuide(text) {
+  const ls = play && play.lastSaid;
+  if (screen === 'play' && ls && coachTalks()) {
+    if (ls.step) sayStep(ls.step, ls.vline);
+    else sayLine(ls.key, ls.v);
+    return;
+  }
+  readAloud(text);
 }
 
 // The guide friend says a recorded line (Gigi). If it can't, the device voice says it.
-function sayLine(key, v = null, still = () => true) {
+function sayLine(key, v = null, still = () => true, keepLast = false) {
   if (!coachTalks()) return;
+  if (play && !keepLast) play.lastSaid = { key, v };
   const lang = L();
   const device = () => { const t = lineText(lang, key, v); if (t) speak(t, lang, { pitch: 1.5, rate: 1.0 }); };
   if (data.settings.coachVoiceKind === 'device') { voiceInfo.last = { how: 'device', key, reason: 'grown-ups chose the device voice' }; device(); return; }
@@ -294,7 +320,7 @@ function bubbleEl({ mood = 'happy', lead = null, text = '', buttons = [], read =
       (read || buttons.length)
         ? h('div', { class: 'rm-bubble-actions' },
           buttons.map((b) => button(b.label, b.onClick, { cls: b.primary ? 'primary' : '', ic: b.ic, k: b.k })),
-          read && spoken ? button(null, () => readAloud(spoken), { cls: 'icon soft', ic: 'read', aria: T('read'), k: 'bubble-read' }) : null)
+          read && spoken ? button(null, () => replayGuide(spoken), { cls: 'icon soft', ic: 'read', aria: T('read'), k: 'bubble-read' }) : null)
         : null));
 }
 
@@ -1877,12 +1903,27 @@ function onTray() {
   const mode = blockMode();
   if (mode === 'explore') act((m) => { if (!M.canBringOnes(m) && !M.canBringTens(m)) return false; M.bringOnes(m); M.bringTens(m); return true; });
   else if (mode === 'bringOnes' || mode === 'bringTens') act((m) => M.applyAction(m, mode));
+  else if (helpBlocksMove(['bringOnes', 'bringTens'])) { /* done */ }
   else guidedWait();
+}
+
+// During help, tapping the blocks does this step's move (bring in the ones, take away...)
+// and numbers the pieces so she can count them.
+function helpBlocksMove(allowed) {
+  if (!play || play.status !== 'guided') return false;
+  const st = curStep();
+  if (!st || !st.sync || !allowed.includes(st.sync) || play.guided.synced) return false;
+  syncStep(st);
+  play.counting = true;
+  play.countedEver = true;
+  update();
+  return true;
 }
 
 function onPiece(x) {
   const m = play.model;
   const mode = blockMode();
+  if (mode === 'none' && x.state === 'in' && helpBlocksMove(x.kind === 'one' ? ['takeOnes', 'takeFromTen'] : ['takeTens'])) return;
   if (m.op === '+') { sfx.tap(); return; }
   if (x.state !== 'in') return;
   if (x.kind === 'one') {
@@ -2331,7 +2372,7 @@ function voiceCheck() {
     h('div', { class: 'rm-field-l' }, T('vc_title')),
     h('p', { class: 'rm-small' }, T('vc_voice', { lang: lang === 'es' ? 'Español' : 'English', who: (voiceNamesCache && voiceNamesCache[lang]) || '\u2026' })),
     h('p', { class: 'rm-small' }, `${T('vc_last')}: ${last}`),
-    h('p', { class: 'rm-small' }, `iPad: ${vi.ios ? T('p_on') : T('p_off')} \u00b7 ${T('p_sound')}: ${data.settings.sound ? T('p_on') : T('p_off')} \u00b7 v15${vi.unlockError ? ` \u00b7 unlock: ${vi.unlockError}` : ''}${vi.mediaError ? ` \u00b7 player: ${vi.mediaError}` : ''}`),
+    h('p', { class: 'rm-small' }, `iPad: ${vi.ios ? T('p_on') : T('p_off')} \u00b7 ${T('p_sound')}: ${data.settings.sound ? T('p_on') : T('p_off')} \u00b7 v16${vi.unlockError ? ` \u00b7 unlock: ${vi.unlockError}` : ''}${vi.mediaError ? ` \u00b7 player: ${vi.mediaError}` : ''}`),
     button(T('vc_test'), () => { unlockMedia(); unlockAudio(); sayLine('hello'); setTimeout(() => { if (screen === 'parent') update(); }, 1200); }, { cls: 'small', ic: 'read', k: 'vc-test' }));
 }
 
