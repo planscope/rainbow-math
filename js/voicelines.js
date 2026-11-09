@@ -121,6 +121,11 @@ export const LINES = {
   place_start: { en: "[cheerful] Let's see what you already know! Just try your best.", es: '[cheerful] ¡Vamos a ver todo lo que ya sabes! Solo haz tu mejor esfuerzo.' },
   place_next: { en: ["[gently] Good try! Let's do another one.", "[gently] Nice try! Here's another one."], es: '[gently] ¡Buen intento! Vamos con otro.' },
   place_done: { en: '[excited] All done! I found the perfect level for you!', es: '[excited] ¡Listo! ¡Encontré el nivel perfecto para ti!' },
+  quiz_intro: { en: ["[excited] Quiz time! Show me what you learned. Do it your way!", "[cheerful] It's quiz time! You've got this. Try it all by yourself!"], es: '[excited] ¡Hora de la prueba! Muéstrame lo que aprendiste. ¡Hazlo a tu manera!' },
+  quiz_check: { en: ["[gently] Hmm, not quite. Check your work and try again!", "[gently] Almost! Look at it one more time."], es: '[gently] Mmm, todavía no. ¡Revisa tu trabajo e inténtalo otra vez!' },
+  quiz_pass: { en: ["[excited] You passed the quiz! I knew you could do it!", "[excited] Woohoo! Quiz passed! You really learned it!"], es: '[excited] ¡Pasaste la prueba! ¡Sabía que podías!' },
+  quiz_more: { en: ["[gently] Great trying! Let's practice a little more, and then try again.", "[cheerful] Good work! A little more practice and you'll get it!"], es: '[gently] ¡Muy buen intento! Practiquemos un poquito más y luego lo intentamos otra vez.' },
+  prize_close: { en: ["[excited] Almost there! Just a few more rainbow pieces for your prize!", "[gasps] You're so close to your prize! Keep going!"], es: '[excited] ¡Ya casi! ¡Unas piezas más de arcoíris para tu premio!' },
 };
 
 const EN_NUM = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
@@ -176,8 +181,8 @@ export function allLines() {
 // her screen ("Nine plus two... how many is that?"). Each explanation is recorded whole,
 // once per number combination that can really happen (found from the step builder).
 // Only the numbers a line needs are used, so there are about 430 English recordings.
-import { buildSteps } from './math.js?v=20';
-import { buildMulSteps } from './mult.js?v=20';
+import { buildSteps } from './math.js?v=21';
+import { buildMulSteps } from './mult.js?v=21';
 
 export const EXPLAIN = {
   x_ones_sum: { from: 'w_ones_sum', params: ['x', 'y'], en: "[curious] Let's add the ones. {x} plus {y}... how many is that?" },
@@ -249,7 +254,7 @@ export function allExplanations(lang = 'en') {
 // ---------------------------------------------------------------- "Read to me" (English)
 // Problems and stories have different numbers every time, so "Read to me" joins short
 // recordings: the story pieces between the numbers, the numbers 0-100, and "What is ... plus ...?".
-import { STORIES } from './i18n.js?v=20';
+import { STORIES } from './i18n.js?v=21';
 
 const OPN = { '+': 'add', '-': 'sub', '×': 'mul' };
 const READ_WORDS = {

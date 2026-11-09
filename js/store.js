@@ -1,6 +1,6 @@
 // Saved data lives only in this browser (localStorage). Every access is
 // wrapped so the app still works when storage is blocked.
-import { NEXT_SKILL, BASE_SKILL, MAX_LEVEL } from './math.js?v=20';
+import { NEXT_SKILL, BASE_SKILL, MAX_LEVEL } from './math.js?v=21';
 
 // Each player (Mila, and classmates who play on this device) has their own saved data.
 // Nothing leaves the device: no accounts, no server.
@@ -9,6 +9,7 @@ const PLAYERS_KEY = 'rainbow-math-players-v1';
 const playerKey = (id) => `rainbow-math-player-${id}`;
 let currentId = null;
 
+const fadeStat = () => ({ run: 0, miss: 0, passed: false });
 const skillStat = () => ({ level: 1, streak: 0, struggle: 0, attempts: 0, independent: 0, helped: 0 });
 
 export function defaults() {
@@ -31,9 +32,12 @@ export function defaults() {
     progress: {
       skills: { A: skillStat(), B: skillStat(), C: skillStat(), D: skillStat(), M: skillStat() },
       unlocked: { C: false, D: false },
-      path: { level: 1, stars: 0, best: 1 }, // the level path
+      path: { level: 1, stars: 0, best: 1, quizDue: false, quizWait: 0, champion: false }, // the level path
       placed: false, // finished the first "what do you know" check
+      // how much the guide helps, per skill: it steps back as she shows she knows it
+      fade: { A: fadeStat(), B: fadeStat(), C: fadeStat(), D: fadeStat(), M: fadeStat() },
     },
+    quizzes: [], // newest first: { date, level, n, k, passed, counted, items: [...] }
     prizes: [], // real-life prizes a grown-up set: { id, title, icon, goal, won, given }
     rewards: { pieces: 0, friends: [], star: false, awarded: [] },
     sessions: [],
@@ -189,6 +193,33 @@ export function recordResult(data, skill, independent) {
     }
   }
   return note;
+}
+
+// ---------------------------------------------------------------- the guide steps back
+// 'full'  = points at every step right away (new skill, or she's been missing)
+// 'light' = waits a little before pointing (3 in a row on her own)
+// 'off'   = only when she taps Help (she passed a quiz with this skill)
+export function helpLevel(data, skill) {
+  const f = data.progress.fade && data.progress.fade[skill];
+  if (!f || f.miss >= 2) return 'full';
+  if (f.passed) return 'off';
+  if (f.run >= 3) return 'light';
+  return 'full';
+}
+export function recordFade(data, skill, independent) {
+  const fade = data.progress.fade || (data.progress.fade = {});
+  const f = fade[skill] || (fade[skill] = fadeStat());
+  if (independent) { f.run++; f.miss = 0; } else {
+    f.run = 0;
+    f.miss++;
+    if (f.miss >= 2) f.passed = false; // two misses in a row: the guide comes back
+  }
+}
+export function passedFade(data, skill) {
+  const fade = data.progress.fade || (data.progress.fade = {});
+  const f = fade[skill] || (fade[skill] = fadeStat());
+  f.passed = true;
+  f.miss = 0;
 }
 
 export { BASE_SKILL };

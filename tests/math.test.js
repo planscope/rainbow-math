@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { generateProblem, isValidProblem, analyzeAnswer, buildSteps, parseEntry, mulberry32, tensOf, onesOf } from '../js/math.js';
+import { generateProblem, isValidProblem, analyzeAnswer, buildSteps, parseEntry, mulberry32, tensOf, onesOf, mistakePattern } from '../js/math.js';
 import * as M from '../js/model.js';
 import { STR, t, STORIES, CREATURE_NAMES, CREATURE_ORDER } from '../js/i18n.js';
 
@@ -203,7 +203,8 @@ test('no discouraging words in child-facing text', () => {
 
 // ---------------------------------------------------------------- level path & multiplication
 import { generateMul, isValidMul, buildMulSteps, analyzeMul } from '../js/mult.js';
-import { LEVELS, pickFromLevel, recordPath, MAX_PATH_LEVEL } from '../js/levels.js';
+import { LEVELS, pickFromLevel, recordPath, MAX_PATH_LEVEL, passLevel, failQuiz, quizPlan, QUIZ } from '../js/levels.js';
+import { defaults, helpLevel, recordFade, passedFade } from '../js/store.js';
 
 test('multiplication problems stay small and friendly', () => {
   const rng = mulberry32(9);
@@ -228,12 +229,21 @@ test('the level path climbs with stars and mixes skills', () => {
   const path = { level: 1, stars: 0, best: 1 };
   recordPath(path, false);
   assert.equal(path.stars, 0, 'help never removes or adds stars');
-  for (let i = 0; i < LEVELS[0].goal - 1; i++) recordPath(path, true);
+  for (let i = 0; i < LEVELS[0].goal - 1; i++) assert.ok(!recordPath(path, true).quizNow);
   assert.equal(path.level, 1);
   const r = recordPath(path, true);
-  assert.ok(r.leveledUp);
+  assert.ok(r.quizNow, 'a full row of stars opens the quiz');
+  assert.equal(path.level, 1, 'stars alone never climb a level');
+  assert.ok(!recordPath(path, true).quizNow, 'the quiz is asked for once, then waits on the home screen');
+  failQuiz(path);
+  assert.equal(path.stars, LEVELS[0].goal, 'a quiz that did not pass takes nothing away');
+  assert.ok(!recordPath(path, true).quizNow);
+  assert.ok(!recordPath(path, true).quizNow);
+  assert.ok(recordPath(path, true).quizNow, `the quiz comes back after ${QUIZ.wait} more stars`);
+  assert.ok(passLevel(path).leveledUp);
   assert.equal(path.level, 2);
   assert.equal(path.stars, 0);
+  assert.equal(path.quizDue, false);
   const rng = mulberry32(3);
   for (const lv of LEVELS) {
     const seen = new Set();
@@ -252,6 +262,43 @@ test('the level path climbs with stars and mixes skills', () => {
   const top = { level: MAX_PATH_LEVEL, stars: 0 };
   for (let i = 0; i < 30; i++) recordPath(top, true);
   assert.equal(top.level, MAX_PATH_LEVEL);
+  assert.ok(passLevel(top).champion);
+  assert.equal(top.level, MAX_PATH_LEVEL);
+});
+
+test('quizzes mix the level with one earlier problem', () => {
+  const rng = mulberry32(11);
+  for (const lv of LEVELS) {
+    const plan = quizPlan(lv.n, { rng });
+    assert.equal(plan.length, QUIZ.size);
+    const fromLevel = plan.filter(([sk, d]) => lv.mix.some(([s2, d2]) => s2 === sk && d2 === d)).length;
+    assert.ok(fromLevel >= QUIZ.size - 1, `level ${lv.n} quiz is mostly its own level`);
+  }
+  assert.ok(quizPlan(7, { rng, multOn: false }).every(([sk]) => sk !== 'M'));
+});
+
+test('quiz mistakes are named for the grown-ups', () => {
+  assert.equal(mistakePattern({ a: 28, b: 26, op: '+', answer: 54 }, 44), 'forgotCarry');
+  assert.equal(mistakePattern({ a: 42, b: 17, op: '-', answer: 25 }, 35), 'smallFromBig');
+  assert.equal(mistakePattern({ a: 42, b: 18, op: '-', answer: 24 }, 34), 'forgotTens');
+  assert.equal(mistakePattern({ a: 42, b: 17, op: '-', answer: 25 }, 59), 'wrongOp');
+  assert.equal(mistakePattern({ a: 31, b: 15, op: '+', answer: 46 }, 64), 'swapped');
+  assert.equal(mistakePattern({ a: 31, b: 15, op: '+', answer: 46 }, 47), 'offByOne');
+  assert.equal(mistakePattern({ a: 31, b: 15, op: '+', answer: 46 }, 46), null);
+  assert.equal(mistakePattern({ a: 4, b: 5, op: '\u00d7', answer: 20 }, 9), 'wrongOp');
+});
+
+test('the guide steps back as she learns, and comes back when she struggles', () => {
+  const d = defaults();
+  assert.equal(helpLevel(d, 'C'), 'full');
+  for (let i = 0; i < 3; i++) recordFade(d, 'C', true);
+  assert.equal(helpLevel(d, 'C'), 'light');
+  passedFade(d, 'C');
+  assert.equal(helpLevel(d, 'C'), 'off');
+  recordFade(d, 'C', false);
+  assert.equal(helpLevel(d, 'C'), 'off', 'one slip is fine');
+  recordFade(d, 'C', false);
+  assert.equal(helpLevel(d, 'C'), 'full', 'two in a row: the guide comes back');
 });
 
 // ---------------------------------------------------------------- guide voice lines

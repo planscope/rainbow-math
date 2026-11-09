@@ -1,14 +1,14 @@
 // Mila's Rainbow Math Adventure: screens and interaction.
-import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js?v=20';
-import * as M from './model.js?v=20';
-import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=20';
-import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL } from './levels.js?v=20';
-import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=20';
-import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=20';
-import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults, loadPlayers, savePlayers, addPlayer, removePlayer, pinHash } from './store.js?v=20';
-import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking as stopDeviceSpeech, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=20';
-import { playLine, playExplain, playSequence, playParts, stopClips, preloadLines, unlockMedia, voiceInfo, voiceNames } from './voice.js?v=20';
-import { lineText, explainFor, readSequence } from './voicelines.js?v=20';
+import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL, mistakePattern } from './math.js?v=21';
+import * as M from './model.js?v=21';
+import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=21';
+import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL, QUIZ, passLevel, failQuiz, quizPlan } from './levels.js?v=21';
+import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=21';
+import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=21';
+import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults, loadPlayers, savePlayers, addPlayer, removePlayer, pinHash, helpLevel, recordFade, passedFade } from './store.js?v=21';
+import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking as stopDeviceSpeech, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=21';
+import { playLine, playExplain, playSequence, playParts, stopClips, preloadLines, unlockMedia, voiceInfo, voiceNames } from './voice.js?v=21';
+import { lineText, explainFor, readSequence } from './voicelines.js?v=21';
 const stopSpeaking = () => { stopDeviceSpeech(); stopClips(); };
 
 // ---------------------------------------------------------------- setup
@@ -125,6 +125,8 @@ function render() {
     case 'prize': view = viewPrize(); break;
     case 'bye': view = viewBye(); break;
     case 'parent': view = viewParent(); break;
+    case 'quizIntro': view = viewQuizIntro(); break;
+    case 'quizDone': view = viewQuizDone(); break;
     default: view = viewWelcome();
   }
   const coach = screen === 'play' && play && play.coach ? coachEls() : [];
@@ -146,8 +148,11 @@ function render() {
 // ---------------------------------------------------------------- guide friend
 // One of Mila's island friends sits next to the place to tap, with "Step 1"
 // and a short instruction, and says it in a cartoon voice.
-const coachOn = () => data.settings.coach !== false && !(data.active && data.active.mode === 'placement');
-const coachTalks = () => coachOn() && data.settings.coachVoice !== false && data.settings.sound;
+const isQuiz = () => !!(data.active && data.active.mode === 'quiz');
+// The guide friend: off in the placement check, and quiet in a quiz unless she asks for Help.
+const coachOn = () => data.settings.coach !== false && !(data.active && data.active.mode === 'placement') && !(isQuiz() && (!play || play.status !== 'guided'));
+const voiceOn = () => data.settings.coach !== false && data.settings.coachVoice !== false && data.settings.sound;
+const coachTalks = () => coachOn() && voiceOn();
 const guideFriend = () => (data.rewards.friends && data.rewards.friends[0]) || 'fox';
 
 function computeCoach() {
@@ -179,6 +184,8 @@ function computeCoach() {
     const lk = GUIDED_LINE[st.key] || (st.kind === 'next' ? 'g_next' : null);
     const lv = st.key === 'w_borrow' ? st.params.t : st.key === 'w_from_ten' ? st.params.y : null;
     Object.assign(c, { n, key: `g${play.guided.i}`, vline: lk ? [lk, lv] : null, step: st });
+  } else if (!fadeAllows()) {
+    return;
   } else if (isMul()) {
     const k = play.mulCounted;
     c = k < p.a
@@ -203,6 +210,24 @@ function computeCoach() {
   if (c.vline) c.say = lineText(L(), c.vline[0], c.vline[1]);
   play.coach = c;
   play.coachFocus = c.focus || null;
+}
+
+// The guide steps back as she learns: right away for a new skill, after a pause once
+// she's on a roll, and only when she taps Help after she passed a quiz with it.
+function fadeAllows() {
+  const lvl = helpLevel(data, play.p.skill);
+  if (lvl === 'off') return false;
+  if (lvl === 'light' && !(data.active.current && data.active.current.wrongs > 0)) {
+    const wait = 8000 - (Date.now() - (play.shownAt || 0));
+    if (wait > 0) {
+      if (!play.coachTimer) {
+        const me = play;
+        play.coachTimer = setTimeout(() => { if (play === me && screen === 'play' && play.status === 'ask') update(); }, wait + 50);
+      }
+      return false;
+    }
+  }
+  return true;
 }
 
 function coachEls() {
@@ -290,7 +315,7 @@ function replayGuide(text) {
 
 // The guide friend says a recorded line (Gigi). If it can't, the device voice says it.
 function sayLine(key, v = null, still = () => true, keepLast = false) {
-  if (!coachTalks()) return;
+  if (!voiceOn()) return;
   if (play && !keepLast) play.lastSaid = { key, v };
   const lang = L();
   const device = () => { const t = lineText(lang, key, v); if (t) speak(t, lang, { pitch: 1.5, rate: 1.0 }); };
@@ -359,25 +384,60 @@ function soundButton() {
   }, { cls: 'icon soft', ic: on ? 'soundOn' : 'soundOff', aria: on ? T('soundOn') : T('soundOff'), k: 'sound', pressed: on });
 }
 
+// Grown-ups area: locked with its own 4-number code. The first time (or a forgotten code)
+// a grown-up answers a multiplication question first, so a child can't set the code.
 function parentHold() {
-  const el = h('button', { type: 'button', class: 'rm-btn rm-hold soft small', 'aria-label': T('grownUps'), 'data-k': 'hold' },
-    h('span', { class: 'rm-btn-ic', html: icon('lock') }),
-    h('span', { class: 'rm-btn-t' }, T('grownUps')),
-    h('span', { class: 'rm-hold-bar' }));
-  let timer = null;
-  const begin = (e) => {
-    if (timer) return;
-    if (e && e.cancelable) e.preventDefault();
-    el.classList.add('holding');
-    timer = setTimeout(() => { cancel(); parentReturn = screen; parentConfirm = false; parentMsg = ''; go('parent'); }, 2000);
-  };
-  const cancel = () => { clearTimeout(timer); timer = null; el.classList.remove('holding'); };
-  el.addEventListener('pointerdown', begin);
-  ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => el.addEventListener(ev, cancel));
-  el.addEventListener('keydown', (e) => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) begin(e); });
-  el.addEventListener('keyup', cancel);
-  el.addEventListener('contextmenu', (e) => e.preventDefault());
-  return el;
+  return button(T('grownUps'), openParent, { cls: 'soft small rm-hold', ic: 'lock', k: 'hold' });
+}
+const newGate = () => ({ ga: 12 + rand(8), gb: 12 + rand(8) });
+function openParent() {
+  stopSpeaking();
+  parentReturn = screen === 'pin' || screen === 'parent' ? 'who' : screen;
+  pin = players.parentPin
+    ? { kind: 'parent', mode: 'enter', entry: '', first: '', msg: '', tries: 0, busy: false }
+    : { kind: 'parent', mode: 'gate', entry: '', first: '', msg: '', tries: 0, busy: false, ...newGate() };
+  go('pin');
+}
+function openParentArea() {
+  parentConfirm = false;
+  go('parent');
+}
+function changeParentPin() {
+  pin = { kind: 'parent', mode: 'create', changing: true, entry: '', first: '', msg: '', tries: 0, busy: false };
+  go('pin');
+}
+function gateCheck() {
+  if (pin.kind !== 'parent' || pin.mode !== 'gate') return;
+  if (Number(pin.entry) === pin.ga * pin.gb) { pin.mode = 'create'; pin.msg = ''; sfx.pop(); }
+  else { pin.msg = T('pp_gateWrong'); sfx.soft(); }
+  pin.entry = '';
+  update();
+}
+async function parentPinDone(entered) {
+  if (pin.mode === 'enter') {
+    if (await pinHash('grown-ups', entered) === players.parentPin) { pin.busy = false; parentMsg = ''; openParentArea(); return; }
+    pin.tries++;
+    pin.msg = T('pp_wrong');
+    sfx.soft();
+  } else if (pin.mode === 'create') {
+    pin.first = entered;
+    pin.mode = 'confirm';
+  } else if (entered === pin.first) {
+    players.parentPin = await pinHash('grown-ups', entered);
+    savePlayers(players);
+    pin.busy = false;
+    parentMsg = pin.changing ? T('p_pinChanged') : '';
+    openParentArea();
+    return;
+  } else {
+    pin.mode = 'create';
+    pin.first = '';
+    pin.msg = T('pinMismatch');
+    sfx.soft();
+  }
+  pin.entry = '';
+  pin.busy = false;
+  update();
 }
 
 const rainbowBar = () => h('div', { class: 'rm-rainbow-bar', 'aria-hidden': 'true' }, [0, 1, 2, 3, 4, 5, 6].map(() => h('span')));
@@ -393,13 +453,14 @@ function viewWelcome() {
     rainbowBar(),
     h('div', { class: 'rm-welcome-scene', html: islandSVG({ pieces: r.pieces, friends: r.friends, rainbows: Math.floor(r.pieces / 7), star: r.star }) }),
     h('div', { class: 'rm-welcome-bubble' }, bubbleEl({ mood: 'happy', text: returning ? T('welcomeBack') : T('welcomeHi') })),
+    prizeStrip(true),
+    nextCard(),
     h('div', { class: 'rm-actions' },
       s
         ? button(T('keepGoing', { n: Math.min(s.index + 1, s.length), total: s.length }), resumeSession, { cls: 'primary big', ic: 'next', k: 'go' })
         : button(T('letsGo'), startFlow, { cls: 'primary big', ic: 'next', k: 'go' }),
       s ? button(T('newAdventure'), () => { data.active = null; play = null; save(data); startFlow(); }, { cls: 'big', k: 'new' }) : null,
       button(T('myIsland'), () => go('island'), { cls: 'big', ic: 'island', k: 'island' })),
-    prizeStrip(),
     h('div', { class: 'rm-foot' },
       button(T('switchPlayer'), switchPlayer, { cls: 'soft small', ic: 'back', k: 'switch' }),
       parentHold()));
@@ -428,27 +489,47 @@ function pickPlayer(pl) {
 }
 
 function viewPin() {
+  const parent = pin.kind === 'parent';
   const pl = pin.target;
-  if (!pl) return viewWho();
-  const title = pin.mode === 'enter' ? T('pinHello', { who: pl.name }) : pin.mode === 'create' ? T('pinCreate') : T('pinConfirm');
+  if (!parent && !pl) return viewWho();
+  const gate = parent && pin.mode === 'gate';
+  const title = parent
+    ? (gate ? T('pp_gate', { a: pin.ga, b: pin.gb }) : pin.mode === 'enter' ? T('pp_enter') : pin.mode === 'create' ? T('pp_create') : T('pp_confirm'))
+    : pin.mode === 'enter' ? T('pinHello', { who: pl.name }) : pin.mode === 'create' ? T('pinCreate') : T('pinConfirm');
   const key = (d) => h('button', { type: 'button', class: 'rm-btn rm-key', 'data-k': `pin-${d}`, onclick: () => { unlockAudio(); pinPress(String(d)); } }, String(d));
-  return h('main', { class: 'rm-screen rm-pin' },
-    h('div', { class: 'rm-row-top' }, button(T('back'), () => go('who'), { cls: 'soft small', ic: 'back', k: 'back' }), langButton()),
-    h('div', { class: 'rm-pin-art', html: friendSVG(pl.friend || 'fox') }),
-    h('h2', { class: 'rm-h2' }, pl.name),
+  const back = () => go(parent ? (pin.changing ? 'parent' : parentReturn || 'who') : 'who');
+  return h('main', { class: `rm-screen rm-pin ${parent ? 'grown' : ''}` },
+    h('div', { class: 'rm-row-top' }, button(T('back'), back, { cls: 'soft small', ic: 'back', k: 'back' }), langButton()),
+    parent ? h('div', { class: 'rm-pin-art lock', html: `<svg viewBox="0 0 24 24" aria-hidden="true">${ICON_LOCK}</svg>` }) : h('div', { class: 'rm-pin-art', html: friendSVG(pl.friend || 'fox') }),
+    h('h2', { class: 'rm-h2' }, parent ? T('pp_title') : pl.name),
     h('p', { class: 'rm-big-text' }, title),
-    h('div', { class: `rm-pin-dots ${pin.msg && pin.mode === 'enter' ? 'shake' : ''}`, role: 'img', 'aria-label': `${pin.entry.length} / 4` },
-      [0, 1, 2, 3].map((i) => h('span', { class: i < pin.entry.length ? 'on' : '' }))),
-    h('p', { class: 'rm-pin-msg', role: 'status' }, pin.msg || '\u00a0'),
+    gate
+      ? h('p', { class: 'rm-pin-typed', 'aria-live': 'polite' }, pin.entry || '\u00a0')
+      : h('div', { class: `rm-pin-dots ${pin.msg && pin.mode === 'enter' ? 'shake' : ''}`, role: 'img', 'aria-label': `${pin.entry.length} / 4` },
+        [0, 1, 2, 3].map((i) => h('span', { class: i < pin.entry.length ? 'on' : '' }))),
+    h('p', { class: 'rm-pin-msg', role: 'status' }, pin.msg || (gate ? T('pp_gateNote') : '\u00a0')),
     h('div', { class: 'rm-keys rm-pin-keys' },
       [1, 2, 3, 4, 5, 6, 7, 8, 9].map(key),
       button(null, () => { pin.entry = pin.entry.slice(0, -1); update(); }, { cls: 'rm-key soft', ic: 'del', aria: T('del'), k: 'pin-del' }),
       key(0),
-      h('span')));
+      gate ? button(null, gateCheck, { cls: 'rm-key primary', ic: 'check', aria: T('pp_ok'), k: 'pin-ok' }) : h('span')),
+    parent && pin.mode === 'enter'
+      ? button(T('pp_forgot'), () => { Object.assign(pin, { mode: 'gate', entry: '', msg: '' }, newGate()); update(); }, { cls: 'soft small', k: 'pp-forgot' })
+      : null);
 }
+const ICON_LOCK = '<rect x="5" y="11" width="14" height="9" rx="2" fill="currentColor"/><path d="M8 11V8a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="2"/>';
 
 async function pinPress(d) {
-  if (pin.busy || pin.entry.length >= 4) return;
+  if (pin.busy) return;
+  if (pin.kind === 'parent' && pin.mode === 'gate') {
+    if (pin.entry.length >= 3) return;
+    pin.entry += d;
+    pin.msg = '';
+    sfx.tap();
+    update();
+    return;
+  }
+  if (pin.entry.length >= 4) return;
   pin.entry += d;
   pin.msg = '';
   sfx.tap();
@@ -458,6 +539,7 @@ async function pinPress(d) {
   const pl = pin.target;
   const entered = pin.entry;
   await new Promise((r) => setTimeout(r, 180));
+  if (pin.kind === 'parent') { await parentPinDone(entered); return; }
   if (pin.mode === 'enter') {
     if (await pinHash(pl.id, entered) === pl.pin) { pin.busy = false; login(pl); return; }
     pin.tries++;
@@ -618,18 +700,53 @@ function viewPlaceDone() {
 const PRIZE_ICONS = ['\u{1F6CD}\uFE0F', '\u{1F366}', '\u{1F9F8}', '\u{1F3A0}', '\u{1F3AC}', '\u{1F355}', '\u{1F4DA}', '\u{1F3A8}', '\u{1F381}', '\u{1F3D6}\uFE0F'];
 const nextPrize = () => (data.prizes || []).filter((x) => !x.won).sort((a, b) => a.goal - b.goal)[0] || null;
 
-function prizeStrip() {
+function prizeStrip(big) {
   const pz = nextPrize();
   if (!pz) return null;
   const have = data.rewards.pieces;
   const pct = Math.min(100, Math.round((have / pz.goal) * 100));
-  return h('div', { class: 'rm-prize-strip', role: 'img', 'aria-label': `${T('prizeNext')}: ${pz.title}. ${T('prizeLeft', { n: Math.max(0, pz.goal - have) })}` },
+  return h('div', { class: `rm-prize-strip ${big ? 'big' : ''} ${pz.goal - have <= 3 ? 'close' : ''}`, role: 'img', 'aria-label': `${T('prizeNext')}: ${pz.title}. ${T('prizeLeft', { n: Math.max(0, pz.goal - have) })}` },
     h('span', { class: 'rm-prize-icon' }, pz.icon),
     h('span', { class: 'rm-prize-text' },
       h('small', null, T('prizeNext')),
       h('b', null, pz.title),
       h('span', { class: 'rm-prize-bar' }, h('span', { style: `width:${pct}%` }))),
-    h('span', { class: 'rm-prize-count' }, h('span', { html: pieceSVG(3) }), `${Math.min(have, pz.goal)}/${pz.goal}`));
+    h('span', { class: 'rm-prize-count' }, h('span', { html: pieceSVG(3) }), `${Math.min(have, pz.goal)}/${pz.goal}`),
+    big ? h('span', { class: 'rm-prize-left' }, T('prizeMore', { n: Math.max(0, pz.goal - have), what: pz.title })) : null);
+}
+
+// The prize stays in sight while she works: "7 more to Target!" fills up with every piece.
+function prizeMini() {
+  const pz = nextPrize();
+  if (!pz) return null;
+  const have = data.rewards.pieces;
+  const left = Math.max(0, pz.goal - have);
+  const pct = Math.min(100, Math.round((have / pz.goal) * 100));
+  const from = play && play.bump ? Math.max(0, Math.round(((have - 1) / pz.goal) * 100)) : pct;
+  return h('div', { class: `rm-prize-mini ${play && play.bump ? 'bump' : ''} ${left <= 3 ? 'close' : ''}`, role: 'img', 'aria-label': `${pz.title}: ${T('prizeLeft', { n: left })}` },
+    h('span', { class: 'rm-prize-mini-ic', 'aria-hidden': 'true' }, pz.icon),
+    h('span', { class: 'rm-prize-mini-t' },
+      h('b', null, T('prizeMore', { n: left, what: pz.title })),
+      h('span', { class: 'rm-prize-bar' }, h('span', { class: from !== pct ? 'grow' : '', style: `width:${pct}%;--from:${from}%` }))));
+}
+
+// What's next on the path: stars to the quiz, or the quiz itself.
+function nextCard() {
+  if (!data.progress.placed) return null;
+  const path = data.progress.path;
+  const lv = levelInfo(path.level);
+  if (path.quizDue) {
+    return h('button', { type: 'button', class: 'rm-next-card quiz', 'data-k': 'next-quiz', onclick: () => { unlockAudio(); sfx.tap(); go('quizIntro'); sayLine('quiz_intro'); } },
+      h('span', { class: 'rm-next-ic', 'aria-hidden': 'true' }, '\u{1F3C6}'),
+      h('span', { class: 'rm-next-t' }, h('b', null, T('nextQuiz')), h('small', null, T('pathLevel', { n: path.level, name: T(`lv${path.level}`) }))),
+      h('span', { class: 'rm-path-go', html: icon('next') }));
+  }
+  const text = path.champion ? T('nextChamp')
+    : path.stars < lv.goal ? T('nextStars', { n: lv.goal - path.stars, l: path.level })
+      : T('nextWait', { n: path.quizWait || 0 });
+  return h('div', { class: 'rm-next-card' },
+    h('span', { class: 'rm-next-ic', 'aria-hidden': 'true' }, path.champion ? '\u{1F451}' : '\u{1F3C6}'),
+    h('span', { class: 'rm-next-t' }, h('b', null, text), starsRow(Math.min(path.stars, lv.goal), lv.goal)));
 }
 
 function checkPrizes() {
@@ -661,9 +778,8 @@ function afterPrize() {
   const s = data.active;
   if (s) { s.prizeWon = null; save(data); }
   if (s && s.levelUp) { go('levelup'); sayLine('levelup'); return; }
-  if (!s) { go('welcome'); return; }
-  if (s.index >= s.length) finishSession();
-  else { newProblem(); go('play'); }
+  if (!s) { if (quizResult) { quizDoneNext(); return; } go('welcome'); return; }
+  continueSession();
 }
 
 // ---------------------------------------------------------------- choose
@@ -713,7 +829,8 @@ function levelChip() {
   return h('div', { class: `rm-level-chip ${play && play.starEarned ? 'bump' : ''}`, role: 'img', 'aria-label': `${T('levelChip', { n: path.level })}: ${T('pathStars', { s: path.stars, g: lv.goal })}` },
     h('b', null, T('levelChip', { n: path.level })),
     h('span', { class: 'rm-level-bar' }, h('span', { style: `width:${pct}%` })),
-    h('span', { class: 'rm-level-n' }, h('span', { html: icon('star') }), `${path.stars}/${lv.goal}`));
+    h('span', { class: 'rm-level-n' }, h('span', { html: icon('star') }), `${path.stars}/${lv.goal}`),
+    path.quizDue ? h('span', { class: 'rm-level-quiz', 'aria-hidden': 'true' }, '\u{1F3C6}') : null);
 }
 
 // ---------------------------------------------------------------- level path map & level up
@@ -729,6 +846,7 @@ function viewPathMap() {
         h('span', { class: 'rm-stone-t' },
           h('b', null, T(`lv${lv.n}`)),
           h('span', null, state === 'done' ? T('pathDone') : state === 'here' ? T('pathHere') : T('pathLocked'))),
+        h('span', { class: `rm-stone-quiz ${state} ${state === 'here' && path.quizDue ? 'due' : ''}`, title: T('pathQuiz') }, '\u{1F3C6}'),
         state === 'here' ? h('span', { class: 'rm-stone-lumi', html: lumiSVG('happy') }) : null,
         state === 'here' ? starsRow(path.stars, lv.goal) : null);
     })),
@@ -827,6 +945,7 @@ function submitMulEntry() {
   const res = analyzeMul(p, n);
   if (res.correct) { solve(); return; }
   if (s0().mode === 'placement') { placementMiss(); return; }
+  if (isQuiz()) { quizWrong(n); return; }
   c.wrongs++;
   save(data);
   sfx.soft();
@@ -873,6 +992,12 @@ function startSession(mode) {
     data.active.length = 7;
     data.active.place = { pass: 0, fail: 11, probe: 4, done: 0, finished: false };
   }
+  if (mode === 'quiz') {
+    const path = data.progress.path;
+    data.active.length = QUIZ.size;
+    // counts = this is the level's quiz (it's due); otherwise it's only a check
+    data.active.quiz = { level: path.level, counts: !!path.quizDue, items: [], plan: quizPlan(path.level, { regroupOn: data.settings.regroup !== 'off', multOn: data.settings.mult !== false }) };
+  }
   newProblem();
   go('play');
 }
@@ -883,6 +1008,8 @@ function resumeSession() {
   if (s.prizeWon) { go('prize'); sayLine('prize'); return; }
   if (s.levelUp) { go('levelup'); sayLine('levelup'); return; }
   if (s.mode === 'placement' && (s.place.finished || s.index >= s.length)) return finishPlacement();
+  if (s.quizNext) return endForQuiz();
+  if (s.mode === 'quiz' && s.index >= s.length) return finishQuiz();
   if (s.index >= s.length) return finishSession();
   if (!s.current || !s.current.p || !validProblem(s.current.p)) newProblem();
   else initPlay();
@@ -898,6 +1025,8 @@ function newProblem() {
   let skill, level;
   if (s.mode === 'placement') {
     [skill, level] = PROBE[s.place.probe] || ['A', 1];
+  } else if (s.mode === 'quiz') {
+    [skill, level] = s.quiz.plan[s.index] || pickFromLevel(s.quiz.level, {});
   } else if (s.mode === 'path') {
     if (s.repeatSkill) { skill = s.repeatSkill; level = s.repeatLevel || 1; }
     else {
@@ -925,6 +1054,7 @@ function newProblem() {
   else if (s.note === 'support') { msg = 'supportNext'; blocks = true; }
   else if (s.note === 'similar') msg = 'similarNext';
   else if (s.note === 'harder') msg = 'harderNext';
+  if (s.mode === 'quiz') { msg = null; blocks = false; } // a quiz starts plain: no blocks, no tips
   const story = !blocks && totalAttempts() > 0 && Math.random() < 0.4 ? rand(10) : null;
   s.current = { p, story, wrongs: 0, helped: false, blocksUsed: blocks, showBlocks: blocks, solved: false, awarded: false, msg, prompt: rand(4) };
   s.used.push(p.key);
@@ -968,6 +1098,10 @@ function initPlay() {
     countedEver: false,
     bump: false,
     fresh: new Map(),
+    shownAt: Date.now(),  // the guide may wait a little before pointing
+    coachTimer: null,
+    scratch: { T: '', O: '' }, // quiz: what she writes in the little boxes on top
+    strike: false,        // quiz: she crossed out the tens to borrow
   };
   setBubble(() => (c.solved ? solvedBubble(null) : introBubble()));
   preloadLines(L(), [['yay1'], ['yay2'], ['yay3'], ['team'], ['oops1'], ['oops2']]);
@@ -997,6 +1131,7 @@ function cellsValue() {
 }
 function selectCell(col) {
   if (!usingCells() || play.status === 'solved') return;
+  if (play.status === 'ask' && isQuiz()) { play.activeCell = col; sfx.tap(); update(); return; }
   if (play.status === 'ask') {
     if (col === phaseCell()) { sfx.tap(); return; }
     if (col === 'tens') { toast(T('onesFirst')); sfx.soft(); return; }
@@ -1021,6 +1156,7 @@ function setBubble(fn) {
 
 function introBubble() {
   const c = data.active.current;
+  if (isQuiz()) return { mood: 'happy', lead: T('quizOf', { i: data.active.index + 1, n: data.active.length }), text: T('quizPrompt') };
   return { mood: 'happy', text: c.msg ? T(c.msg) : T('prompt', { pick: c.prompt }) };
 }
 
@@ -1034,7 +1170,7 @@ function goHome() {
 function viewPlay() {
   const s = data.active;
   const mul = isMul();
-  return h('main', { class: `rm-screen rm-play ${play.showBlocks || mul ? 'with-blocks' : 'no-blocks'} ${mul ? 'is-mul' : ''}` },
+  return h('main', { class: `rm-screen rm-play ${play.showBlocks || mul ? 'with-blocks' : 'no-blocks'} ${mul ? 'is-mul' : ''} ${isQuiz() ? 'quiz' : ''}` },
     topBar(s),
     h('section', { class: 'rm-a-bubble' }, bubbleEl(play.bubble)),
     h('section', { class: 'rm-a-problem' }, mul ? mulCard() : problemCard()),
@@ -1055,7 +1191,8 @@ function topBar(s) {
     h('div', { class: 'rm-dots', role: 'img', 'aria-label': T('problemOf', { i: Math.min(s.index + 1, s.length), n: s.length }) }, dots),
     h('div', { class: `rm-pieces ${play.bump ? 'bump' : ''}`, role: 'img', 'aria-label': T('pieces', { n }) },
       h('span', { html: pieceSVG(n) }), h('b', null, String(n))),
-    s.mode === 'path' ? levelChip() : null,
+    prizeMini(),
+    s.mode === 'quiz' ? h('div', { class: 'rm-level-chip quiz' }, h('span', { 'aria-hidden': 'true' }, '\u{1F3C6}'), h('b', null, T('quizChip'))) : s.mode === 'path' ? levelChip() : null,
     soundButton());
 }
 
@@ -1121,11 +1258,28 @@ function writtenEl() {
       markT = h('button', { type: 'button', class: 'rm-carry-target', 'data-k': 'carry-target', 'aria-label': T('act_carry'), onclick: doCarry }, '?');
     }
   }
+  const quiz = isQuiz() && !gst;
+  if (quiz) {
+    // like on paper: the little boxes on top are hers to fill or leave empty, on every problem
+    const sbox = (col) => h('button', {
+      type: 'button',
+      class: `rm-scratch ${play.status === 'ask' && play.activeCell === `s${col}` ? 'active' : ''} ${play.scratch[col] ? 'filled' : ''}`,
+      'data-k': `cell-s${col}`,
+      'aria-label': `${T(col === 'T' ? 'scratchT' : 'scratchO')}: ${play.scratch[col] || '?'}`,
+      disabled: play.status !== 'ask',
+      onclick: () => selectCell(`s${col}`),
+    }, play.scratch[col] || '');
+    markT = sbox('T');
+    markO = p.op === '-' ? sbox('O') : null;
+  }
+  const struck = quiz && play.strike;
   const cell = (txt, col, extra = '') => h('span', { class: `rm-w-c ${col} ${fc === col ? 'focus' : ''} ${extra}` }, txt);
   const borrowNow = gst && gst.kind === 'borrow' && !traded;
   // while answering on her own, Mila may tap the tens digit to borrow when she needs to
-  const borrowOwn = play.status === 'ask' && p.op === '-' && a1 < b1 && !traded && play.phase === 'ones';
-  const topTens = borrowNow || borrowOwn
+  const borrowOwn = !isQuiz() && play.status === 'ask' && p.op === '-' && a1 < b1 && !traded && play.phase === 'ones';
+  const topTens = quiz && p.op === '-'
+    ? h('button', { type: 'button', class: `rm-w-c tens num-a rm-borrow-btn quiet ${struck ? 'struck' : ''}`, 'data-k': 'borrow-digit', 'aria-label': T('strikeTens'), disabled: play.status !== 'ask', onclick: quizStrike }, String(a10))
+    : borrowNow || borrowOwn
     ? h('button', { type: 'button', class: `rm-w-c tens num-a rm-borrow-btn ${borrowOwn ? 'quiet' : ''}`, 'data-k': 'borrow-digit', 'aria-label': T('act_borrow'), onclick: borrowOwn ? borrowByTap : doBorrow }, String(a10))
     : cell(String(a10), 'tens', `num-a ${traded && p.op === '-' ? 'struck' : ''}`);
   const cellsOn = usingCells() && play.status !== 'solved';
@@ -1139,10 +1293,10 @@ function writtenEl() {
   }, col === 'ones' && play.splitting && String(txt).length === 2
     ? [h('span', { class: 'rm-box-ten' }, String(txt)[0]), String(txt)[1]]
     : txt);
-  return h('div', { class: `rm-written ${traded || (gst && gst.split) ? 'traded' : ''}` },
+  return h('div', { class: `rm-written ${traded || quiz || (gst && gst.split) ? 'traded' : ''} ${quiz ? 'quiz' : ''}` },
     h('span', { class: 'rm-w-op' }), cell(T('tensCol'), 'tens', 'rm-w-h'), cell(T('onesCol'), 'ones', 'rm-w-h'),
     h('span', { class: 'rm-w-op' }), cell(markT, 'tens', 'rm-w-mark'), cell(markO, 'ones', 'rm-w-mark'),
-    h('span', { class: 'rm-w-op' }), topTens, cell(String(a1), 'ones', `num-a ${traded && p.op === '-' ? 'struck' : ''}`),
+    h('span', { class: 'rm-w-op' }), topTens, cell(String(a1), 'ones', `num-a ${(traded && p.op === '-' && !quiz) || struck ? 'struck' : ''}`),
     h('span', { class: 'rm-w-op' }, opSym(p.op)), cell(String(b10), 'tens', 'num-b'), cell(String(b1), 'ones', 'num-b'),
     h('span', { class: 'rm-w-line' }),
     h('span', { class: 'rm-w-op' }), box(ansT, 'tens', penT), box(ansO, 'ones', penO));
@@ -1160,7 +1314,11 @@ function padEl() {
   const cellsOn = usingCells();
   let shown = play.entry;
   let tip = null;
-  if (cellsOn && play.status === 'ask') {
+  if (cellsOn && play.status === 'ask' && isQuiz()) {
+    const ac = play.activeCell;
+    label = T('quizTyping', { box: ac === 'sT' || ac === 'sO' ? T('boxTop') : ac === 'ones' ? T('onesCol') : T('tensCol') });
+    shown = ac === 'sT' ? play.scratch.T : ac === 'sO' ? play.scratch.O : play.cells[ac];
+  } else if (cellsOn && play.status === 'ask') {
     const info = colInfo();
     const col = phaseCell();
     label = `${col === 'ones' ? T('onesCol') : T('tensCol')}: ${col === 'ones' ? info.onesExpr : info.tensExpr} = ?`;
@@ -1251,6 +1409,19 @@ function press(d) {
     update();
     return;
   }
+  if (play.status === 'ask' && !isMul() && isQuiz()) {
+    const col = play.activeCell;
+    if (col === 'sT') play.scratch.T = d;
+    else if (col === 'sO') { const cur = play.scratch.O; play.scratch.O = cur.length >= 2 || cur === '0' ? d : cur + d; }
+    else {
+      play.cells[col] = d;
+      if (col === 'ones' && play.cells.tens === '') play.activeCell = 'tens';
+    }
+    play.entryStale = false;
+    sfx.tap();
+    update();
+    return;
+  }
   if (play.status === 'ask' && !isMul()) {
     if (play.splitting) return;
     const col = phaseCell();
@@ -1279,6 +1450,14 @@ function del() {
   if (play.status === 'solved') return;
   const gs = play.status === 'guided' ? curStep() : null;
   if (gs && gs.kind === 'write') { play.cells[gs.cell] = ''; update(); return; }
+  if (play.status === 'ask' && !isMul() && isQuiz()) {
+    const col = play.activeCell;
+    if (col === 'sT') play.scratch.T = '';
+    else if (col === 'sO') play.scratch.O = play.scratch.O.slice(0, -1);
+    else play.cells[col] = '';
+    update();
+    return;
+  }
   if (play.status === 'ask' && !isMul()) {
     if (play.splitting) return;
     const col = phaseCell();
@@ -1305,6 +1484,7 @@ function submit() {
     return submitGuided(g);
   }
   if (play.status === 'ask' && isMul()) return submitMulEntry();
+  if (play.status === 'ask' && isQuiz()) return quizSubmit();
   if (play.status === 'ask') return submitColumn();
   const n = usingCells() ? cellsValue() : parseEntry(play.entryStale ? '' : play.entry);
   if (n === 'needOnes') {
@@ -1360,6 +1540,81 @@ function tryAgain() {
   clearCells();
   setBubble(() => ({ mood: 'happy', text: T('prompt', { pick: data.active.current.prompt }) }));
   update();
+}
+
+// ---------------------------------------------------------------- quiz: the whole answer, her way
+function quizStrike() {
+  if (!isQuiz() || play.status !== 'ask') return;
+  play.strike = !play.strike;
+  if (play.strike) play.activeCell = 'sT';
+  sfx.tap();
+  update();
+}
+
+function quizSubmit() {
+  const n = cellsValue();
+  if (n === 'needOnes') { play.activeCell = 'ones'; toast(T('fillOnes')); sfx.soft(); update(); return; }
+  if (n === null) { toast(T('blankEntry')); sfx.soft(); return; }
+  if (n === play.p.answer) { solve(); return; }
+  quizWrong(n);
+}
+
+// A wrong quiz answer: no hints about what's wrong. One more try, or Help (which counts as help).
+function quizWrong(n) {
+  const c = data.active.current;
+  c.wrongs++;
+  c.tries = [...(c.tries || []), n];
+  save(data);
+  sfx.soft();
+  if (c.wrongs >= 2) { quizMiss(); return; }
+  sayLine('quiz_check');
+  if (isMul()) play.entryStale = true;
+  setBubble(() => ({
+    mood: 'think',
+    text: T('quizCheck'),
+    buttons: [
+      { label: T('tryAgain'), onClick: () => { if (isMul()) { play.entry = ''; play.entryStale = false; } setBubble(introBubble); update(); }, primary: true, k: 'try' },
+      { label: T('helpSteps'), onClick: startGuided, ic: 'help', k: 'steps' },
+    ],
+  }));
+  update();
+}
+
+// Two misses: show the answer kindly and move on. It's written down for the grown-ups.
+function quizMiss() {
+  const s = data.active, c = s.current, p = play.p;
+  play.status = 'solved';
+  play.solvedAt = Date.now();
+  play.entry = String(p.answer);
+  play.entryStale = false;
+  play.cells = answerCells(p.answer);
+  play.focusCol = null;
+  if (isMul()) play.mulCounted = p.a;
+  c.solved = true;
+  c.awarded = true;
+  c.independent = false;
+  s.results.push({ skill: p.skill, key: p.key, independent: false });
+  recordResult(data, p.skill, false);
+  recordFade(data, p.skill, false);
+  quizRecord(false);
+  save(data);
+  setBubble(() => ({ mood: 'happy', text: T('quizShow', { n: p.answer }), buttons: [{ label: T('quizNextBtn'), onClick: goNext, primary: true, ic: 'next', k: 'b-next' }] }));
+  update();
+}
+
+// What the grown-ups see: her tries, whether she wrote the carry / borrow herself, and the kind of slip.
+function quizRecord(ok) {
+  const s = data.active, c = s.current, p = play.p;
+  const sc = play.scratch || { T: '', O: '' };
+  const tries = c.tries || [];
+  const item = {
+    key: p.key, skill: p.skill, op: p.op, a: p.a, b: p.b, answer: p.answer, tries,
+    ok, firstTry: ok && !c.wrongs && !c.helped, helped: !!c.helped, blocks: !!c.blocksUsed,
+    pattern: mistakePattern(p, tries[0]),
+  };
+  if (p.op === '+' && onesOf(p.a) + onesOf(p.b) >= 10) item.carry = sc.T === '1';
+  if (p.op === '-' && onesOf(p.a) < onesOf(p.b)) item.borrow = sc.T === String(tensOf(p.a) - 1) || sc.O === String(onesOf(p.a) + 10) || !!play.strike;
+  s.quiz.items.push(item);
 }
 
 // ---------------------------------------------------------------- column by column (paper method)
@@ -1690,7 +1945,8 @@ function solve() {
   if (!c.awarded) {
     c.awarded = true;
     c.solved = true;
-    const independent = !c.helped && c.wrongs === 0;
+    // in a quiz, fixing her own answer on the 2nd try still counts as on her own
+    const independent = s.mode === 'quiz' ? !c.helped : !c.helped && c.wrongs === 0;
     c.independent = independent;
     const key = `${s.id}:${s.index}`;
     if (!data.rewards.awarded.includes(key)) {
@@ -1698,15 +1954,20 @@ function solve() {
       data.rewards.awarded = [...data.rewards.awarded, key].slice(-80);
       play.bump = true;
       checkPrizes();
+      const pz = nextPrize();
+      const left = pz ? pz.goal - data.rewards.pieces : 0;
+      if (pz && !s.prizeWon && left > 0 && left <= 3 && !pz.nearSaid) { pz.nearSaid = true; play.sayPrizeClose = true; }
     }
     if (s.mode === 'placement') placementRecord(independent);
+    if (s.mode === 'quiz') quizRecord(true);
+    if (s.mode !== 'placement') recordFade(data, p.skill, independent);
     s.results.push({ skill: p.skill, key: p.key, independent });
     const note = recordResult(data, p.skill, independent);
-    if (c.helped) { s.repeatSkill = p.skill; s.repeatLevel = p.level; s.note = 'similar'; }
+    if (c.helped && s.mode !== 'quiz') { s.repeatSkill = p.skill; s.repeatLevel = p.level; s.note = 'similar'; }
     if (s.mode === 'path') {
       const r = recordPath(data.progress.path, independent);
       if (independent) play.starEarned = true;
-      if (r.leveledUp) { s.levelUp = r.level; s.repeatSkill = null; s.note = null; }
+      if (r.quizNow) { s.quizNext = true; s.repeatSkill = null; s.note = null; } // a full row of stars: quiz time
     }
     if (note.eased) {
       s.note = 'support';
@@ -1731,6 +1992,11 @@ function solve() {
   setBubble(() => solvedBubble({ wasGuided, independent, pickN, praiseKey }));
   sfx.correct();
   if (wasGuided || !c.independent) sayLine('team'); else cheer();
+  if (play.sayPrizeClose) {
+    play.sayPrizeClose = false;
+    const me = play;
+    setTimeout(() => { if (play === me && screen === 'play') sayLine('prize_close'); }, 2300);
+  }
   setTimeout(() => sfx.reward(), 450);
   update();
   play.bump = false;
@@ -1780,17 +2046,117 @@ function goNext() {
   }
   if (s.prizeWon) { go('prize'); sayLine('prize'); return; }
   if (s.levelUp) { go('levelup'); sayLine('levelup'); return; }
+  continueSession();
+}
+
+function continueSession() {
+  const s = data.active;
+  if (!s) { go('welcome'); return; }
+  if (s.quizNext) { endForQuiz(); return; }
+  if (s.mode === 'quiz' && s.index >= s.length) { finishQuiz(); return; }
   if (s.index >= s.length) finishSession();
   else { newProblem(); go('play'); }
 }
 
 function afterLevelUp() {
   const s = data.active;
-  if (!s) { go('welcome'); return; }
+  if (!s) { if (quizResult) { quizDoneNext(); return; } go('welcome'); return; }
   s.levelUp = null;
   save(data);
-  if (s.index >= s.length) finishSession();
-  else { newProblem(); go('play'); }
+  continueSession();
+}
+
+// ---------------------------------------------------------------- quizzes
+// The practice adventure pauses here: a full row of stars means it's quiz time.
+function endForQuiz() {
+  const s = data.active;
+  if (s && s.results.length) {
+    const own = s.results.filter((r) => r.independent).length;
+    data.sessions = [{ date: new Date().toISOString(), mode: s.mode, done: s.results.length, own, team: s.results.length - own }, ...data.sessions].slice(0, 30);
+  }
+  data.active = null;
+  play = null;
+  save(data);
+  go('quizIntro');
+  sayLine('quiz_intro');
+}
+
+function viewQuizIntro() {
+  const n = data.progress.path.level;
+  const text = T('quizText', { n, k: QUIZ.size });
+  return h('main', { class: 'rm-screen rm-celebrate rm-quizintro' },
+    h('div', { class: 'rm-quiz-trophy', 'aria-hidden': 'true' }, '\u{1F3C6}'),
+    h('h2', { class: 'rm-h2' }, T('quizTitle')),
+    h('p', { class: 'rm-big-text' }, T('pathLevel', { n, name: T(`lv${n}`) })),
+    h('p', { class: 'rm-text' }, text),
+    prizeStrip(true),
+    h('div', { class: 'rm-actions' },
+      button(null, () => readAloud(`${T('quizTitle')} ${text}`), { cls: 'icon soft', ic: 'read', aria: T('read'), k: 'read' }),
+      button(T('quizGo'), () => { unlockAudio(); stopSpeaking(); data.active = null; play = null; startSession('quiz'); }, { cls: 'primary big', ic: 'next', k: 'quiz-go' }),
+      button(T('quizLater'), () => go('welcome'), { cls: 'big', k: 'quiz-later' })));
+}
+
+let quizResult = null;
+function finishQuiz() {
+  const s = data.active;
+  if (!s || s.finished) return;
+  s.finished = true;
+  const q = s.quiz;
+  const path = data.progress.path;
+  const n = q.items.length;
+  const k = q.items.filter((x) => x.ok && !x.helped).length;
+  const passed = n > 0 && k >= Math.ceil((QUIZ.pass / QUIZ.size) * n);
+  const date = new Date().toISOString();
+  data.quizzes = [{ date, level: q.level, n, k, passed, counted: q.counts, items: q.items }, ...(data.quizzes || [])].slice(0, 30);
+  data.sessions = [{ date, mode: 'quiz', done: n, own: k, team: n - k }, ...data.sessions].slice(0, 30);
+  let wentUp = false, champion = false, bonus = 0;
+  const itsLevel = q.counts && path.level === q.level;
+  if (passed) {
+    bonus = QUIZ.bonus;
+    data.rewards.pieces += bonus;
+    // the guide steps back only for skills she got right on her own every time in this quiz
+    const shaky = new Set(q.items.filter((it) => !it.ok || it.helped).map((it) => it.skill));
+    for (const it of q.items) if (!shaky.has(it.skill)) passedFade(data, it.skill);
+    if (itsLevel) { const r = passLevel(path); wentUp = !!r.leveledUp; champion = !!r.champion; }
+  } else if (itsLevel) failQuiz(path);
+  checkPrizes();
+  quizResult = { k, n, passed, bonus, wentUp, levelUp: wentUp, champion, counted: itsLevel, prize: !!s.prizeWon, level: path.level, wait: path.quizWait || 0, items: q.items };
+  data.active = null;
+  play = null;
+  save(data);
+  sfx.reward();
+  go('quizDone');
+  sayLine(passed ? 'quiz_pass' : 'quiz_more');
+}
+
+function quizDoneNext() {
+  const r = quizResult;
+  if (r && r.prize) { r.prize = false; go('prize'); sayLine('prize'); return; }
+  if (r && r.levelUp) { r.levelUp = false; go('levelup'); sayLine('levelup'); return; }
+  quizResult = null;
+  go('welcome');
+}
+
+function viewQuizDone() {
+  const r = quizResult || { k: 0, n: 0, passed: false, bonus: 0, items: [] };
+  const conf = r.passed && !reduced() ? h('div', { class: 'rm-confetti', 'aria-hidden': 'true' },
+    Array.from({ length: 30 }, (_, i) => h('span', { style: `--i:${i};--x:${(i * 37) % 100}` }))) : null;
+  const title = r.passed ? T('quizPassTitle') : T('quizDoneTitle');
+  const text = r.passed
+    ? (r.champion ? T('quizChampText', { b: r.bonus }) : r.wentUp ? T('quizPassText', { n: r.level, b: r.bonus }) : T('quizCheckText', { b: r.bonus }))
+    : (r.counted ? T('quizMoreText', { w: r.wait }) : T('quizMoreCheck'));
+  return h('main', { class: 'rm-screen rm-celebrate rm-quizdone' },
+    conf,
+    h('div', { class: 'rm-lumi big', html: lumiSVG(r.passed ? 'cheer' : 'happy') }),
+    h('h2', { class: 'rm-h2' }, title),
+    h('div', { class: 'rm-quiz-score', role: 'img', 'aria-label': T('quizScore', { k: r.k, n: r.n }) },
+      r.items.map((it) => h('span', { class: it.ok && !it.helped ? 'on' : '', html: icon('star') }))),
+    h('p', { class: 'rm-big-text' }, T('quizScore', { k: r.k, n: r.n })),
+    h('p', { class: 'rm-text' }, text),
+    prizeStrip(true),
+    h('div', { class: 'rm-actions' },
+      button(null, () => readAloud(`${title} ${T('quizScore', { k: r.k, n: r.n })}. ${text}`), { cls: 'icon soft', ic: 'read', aria: T('read'), k: 'read' }),
+      button(T('quizNextBtn'), quizDoneNext, { cls: 'primary big', ic: 'next', k: 'quiz-next' })));
 }
 
 function finishSession() {
@@ -2410,7 +2776,8 @@ function viewParent() {
         h('h2', { class: 'rm-h2' }, T('p_title')),
         button(T('p_close'), () => go('who'), { cls: 'soft small', ic: 'close', k: 'p-close' })),
       parentMsg ? h('p', { class: 'rm-small ok', role: 'status' }, parentMsg) : null,
-      playersSection());
+      playersSection(),
+      h('section', { class: 'rm-card rm-p-sec' }, button(T('p_changePin'), changeParentPin, { cls: 'small soft', ic: 'lock', k: 'p-change-pin' })));
   }
   const st = data.settings;
   const sk = data.progress.skills;
@@ -2425,6 +2792,8 @@ function viewParent() {
     h('div', { class: 'rm-row-top' },
       h('h2', { class: 'rm-h2' }, `${T('p_title')} \u00b7 ${player.name}`),
       button(T('p_close'), () => go(parentReturn === 'parent' ? 'welcome' : parentReturn), { cls: 'soft small', ic: 'close', k: 'p-close' })),
+    parentMsg ? h('p', { class: 'rm-small ok', role: 'status' }, parentMsg) : null,
+    learningSection(),
     prizesSection(),
     h('section', { class: 'rm-card rm-p-sec' },
       seg(T('p_practice'), st.practice, [['choose', T('p_choose')], ['path', T('p_path_opt')], ['add', T('p_add')], ['sub', T('p_sub')], ['mix', T('p_mix')], ['mul', T('p_mul_opt')]], (v) => { st.practice = v; }),
@@ -2433,6 +2802,9 @@ function viewParent() {
         path.level = v;
         path.stars = 0;
         path.best = Math.max(path.best || 1, v);
+        path.quizDue = false;
+        path.quizWait = 0;
+        path.champion = false;
       }),
       h('p', { class: 'rm-small' }, `${T('pathLevel', { n: data.progress.path.level, name: T(`lv${data.progress.path.level}`) })}. ${T('p_pathNote')}`),
       seg(T('p_mult'), st.mult !== false, [[true, T('p_on')], [false, T('p_off')]], (v) => { st.mult = v; }),
@@ -2471,7 +2843,7 @@ function viewParent() {
       !storageOK ? h('p', { class: 'rm-small warn' }, T('p_noStorage')) : null,
       h('p', { class: 'rm-small' }, T('p_speechNote'), canSpeak() ? '' : ' ✖'),
       h('p', { class: 'rm-small' }, T('p_unlistedNote')),
-      parentMsg ? h('p', { class: 'rm-small ok', role: 'status' }, parentMsg) : null,
+      button(T('p_changePin'), changeParentPin, { cls: 'small soft', ic: 'lock', k: 'p-change-pin' }),
       parentConfirm
         ? h('div', { class: 'rm-confirm', role: 'alertdialog', 'aria-label': T('p_reset') },
           h('p', { class: 'rm-text' }, T('p_resetSure')),
@@ -2479,6 +2851,62 @@ function viewParent() {
             button(T('p_resetYes'), resetProgress, { cls: 'danger', k: 'reset-yes' }),
             button(T('p_resetNo'), () => { parentConfirm = false; update(); }, { cls: 'soft', k: 'reset-no' })))
         : button(T('p_reset'), () => { parentConfirm = true; update(); }, { cls: 'soft', ic: 'reset', k: 'reset' })));
+}
+
+const fmtDay = (iso) => { try { return new Date(iso).toLocaleDateString(L() === 'es' ? 'es-MX' : 'en-US', { month: 'short', day: 'numeric' }); } catch (e) { return String(iso).slice(0, 10); } };
+
+// Is she learning or just following the guide? Practice (with the guide) next to quizzes (alone),
+// the kinds of slips in quizzes, and every quiz problem with what she wrote.
+function learningSection() {
+  const sk = data.progress.skills;
+  const quizzes = data.quizzes || [];
+  const all = quizzes.flatMap((q) => q.items || []);
+  const rows = ['A', 'B', 'C', 'D', 'M'].filter((k) => sk[k].attempts > 0 || all.some((i) => i.skill === k)).map((k) => {
+    const items = all.filter((i) => i.skill === k);
+    const qOwn = items.filter((i) => i.ok && !i.helped).length;
+    const pp = sk[k].attempts ? sk[k].independent / sk[k].attempts : 0;
+    const qp = items.length ? qOwn / items.length : 0;
+    const verdict = items.length < 2 ? 'v_noData' : qp >= 0.8 ? 'v_learned' : pp >= 0.7 && qp < 0.6 ? 'v_guide' : 'v_learning';
+    return h('tr', null,
+      h('th', { scope: 'row' }, T(`skill_${k}`)),
+      h('td', null, sk[k].attempts ? `${Math.round(pp * 100)}%` : '\u2013'),
+      h('td', null, items.length ? `${qOwn}/${items.length}` : '\u2013'),
+      h('td', null, T(`fade_${helpLevel(data, k)}`)),
+      h('td', { class: `rm-verdict ${verdict}` }, T(verdict)));
+  });
+  const counts = {};
+  for (const it of all) if (it.pattern) counts[it.pattern] = (counts[it.pattern] || 0) + 1;
+  const mistakes = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const sym = (op) => (op === '+' ? '+' : op === '-' ? '\u2212' : '\u00d7');
+  const itemText = (it) => {
+    const how = it.helped ? T('q_help') : !it.ok ? T('q_miss') : it.firstTry ? T('q_own') : T('q_retry');
+    const marks = [
+      it.carry === true ? T('q_carry') : it.carry === false ? T('q_noCarry') : null,
+      it.borrow === true ? T('q_borrow') : it.borrow === false ? T('q_noBorrow') : null,
+      it.blocks ? T('q_blocks') : null,
+    ].filter(Boolean).join(', ');
+    const tries = (it.tries || []).length ? `${it.tries.join(', ')} \u2192 ` : '';
+    return `${it.ok ? '\u2714' : '\u2716'} ${it.a} ${sym(it.op)} ${it.b} = ${tries}${it.answer} \u00b7 ${how}${marks ? ` \u00b7 ${marks}` : ''}`;
+  };
+  return h('section', { class: 'rm-card rm-p-sec' },
+    h('h3', { class: 'rm-h3' }, T('p_learn')),
+    h('p', { class: 'rm-small' }, T('p_learnNote')),
+    rows.length ? h('div', { class: 'rm-table-wrap' },
+      h('table', { class: 'rm-table' },
+        h('thead', null, h('tr', null, [T('p_skill'), T('p_colPractice'), T('p_colQuiz'), T('p_colGuide'), T('p_colVerdict')].map((x) => h('th', { scope: 'col' }, x)))),
+        h('tbody', null, rows))) : null,
+    h('h3', { class: 'rm-h3' }, T('p_mistakes')),
+    mistakes.length
+      ? h('ul', { class: 'rm-sessions' }, mistakes.map(([k, n]) => h('li', null, `${T(`mk_${k}`)}: ${n}`)))
+      : h('p', { class: 'rm-small' }, T('p_noMistakes')),
+    h('h3', { class: 'rm-h3' }, T('p_quizzes')),
+    quizzes.length
+      ? h('ul', { class: 'rm-sessions rm-quizlist' }, quizzes.slice(0, 8).map((q) => h('li', null,
+        h('b', null, T('p_quizRow', { date: fmtDay(q.date), l: q.level, k: q.k, n: q.n, res: !q.counted ? `${T('p_checkOnly')}${q.passed ? ' \u2714' : ''}` : q.passed ? T('p_passed') : T('p_notYet') })),
+        h('ul', null, (q.items || []).map((it) => h('li', { class: 'rm-small' }, itemText(it)))))))
+      : h('p', { class: 'rm-small' }, T('p_noQuizzes')),
+    button(T('p_quizNow'), () => go('quizIntro'), { cls: 'primary small', ic: 'star', k: 'p-quiz' }),
+    h('p', { class: 'rm-small' }, T('p_quizNowNote')));
 }
 
 function voiceField() {
@@ -2514,7 +2942,7 @@ function voiceCheck() {
     h('div', { class: 'rm-field-l' }, T('vc_title')),
     h('p', { class: 'rm-small' }, T('vc_voice', { lang: lang === 'es' ? 'Español' : 'English', who: (voiceNamesCache && voiceNamesCache[lang]) || '\u2026' })),
     h('p', { class: 'rm-small' }, `${T('vc_last')}: ${last}`),
-    h('p', { class: 'rm-small' }, `iPad: ${vi.ios ? T('p_on') : T('p_off')} \u00b7 ${T('p_sound')}: ${data.settings.sound ? T('p_on') : T('p_off')} \u00b7 v20${vi.unlockError ? ` \u00b7 unlock: ${vi.unlockError}` : ''}${vi.mediaError ? ` \u00b7 player: ${vi.mediaError}` : ''}`),
+    h('p', { class: 'rm-small' }, `iPad: ${vi.ios ? T('p_on') : T('p_off')} \u00b7 ${T('p_sound')}: ${data.settings.sound ? T('p_on') : T('p_off')} \u00b7 v21${vi.unlockError ? ` \u00b7 unlock: ${vi.unlockError}` : ''}${vi.mediaError ? ` \u00b7 player: ${vi.mediaError}` : ''}`),
     button(T('vc_test'), () => { unlockMedia(); unlockAudio(); sayLine('hello'); setTimeout(() => { if (screen === 'parent') update(); }, 1200); }, { cls: 'small', ic: 'read', k: 'vc-test' }));
 }
 
@@ -2531,6 +2959,7 @@ function resetProgress() {
 // ---------------------------------------------------------------- keyboard
 function onKey(e) {
   if (screen === 'pin' && /^[0-9]$/.test(e.key)) { e.preventDefault(); pinPress(e.key); return; }
+  if (screen === 'pin' && e.key === 'Enter' && pin.kind === 'parent' && pin.mode === 'gate') { e.preventDefault(); gateCheck(); return; }
   if (screen === 'pin' && e.key === 'Backspace') { e.preventDefault(); pin.entry = pin.entry.slice(0, -1); update(); return; }
   if (screen !== 'play' || !play) return;
   if (e.metaKey || e.ctrlKey || e.altKey) return;

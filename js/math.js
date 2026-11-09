@@ -142,6 +142,29 @@ export function analyzeAnswer(p, ans) {
   return out;
 }
 
+// For the grown-ups' report: the kind of slip behind a wrong quiz answer.
+export function mistakePattern(p, ans) {
+  if (ans == null || ans === p.answer) return null;
+  if (p.op === '\u00d7') {
+    if (ans === p.a + p.b) return 'wrongOp';
+    if (Math.abs(ans - p.answer) === p.b || Math.abs(ans - p.answer) === p.a) return 'groupOff';
+    return 'other';
+  }
+  const a10 = tensOf(p.a), a1 = onesOf(p.a), b10 = tensOf(p.b), b1 = onesOf(p.b);
+  if (p.op === '+') {
+    if (a1 + b1 >= 10 && ans === p.answer - 10) return 'forgotCarry';
+    if (ans === p.a - p.b) return 'wrongOp';
+  } else {
+    if (a1 < b1 && ans === (a10 - b10) * 10 + (b1 - a1)) return 'smallFromBig';
+    if (a1 < b1 && ans === p.answer + 10) return 'forgotTens';
+    if (ans === p.a + p.b) return 'wrongOp';
+  }
+  if (ans >= 10 && ans <= 99 && p.answer >= 10 && ans === onesOf(p.answer) * 10 + tensOf(p.answer)) return 'swapped';
+  if (Math.abs(ans - p.answer) === 1) return 'offByOne';
+  if (Math.abs(ans - p.answer) === 10) return 'tensOff';
+  return 'other';
+}
+
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 // Guided steps follow the paper method, one small thing at a time:
