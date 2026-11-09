@@ -39,6 +39,8 @@ export function unlockAudio() {
   } catch (e) { /* ignore */ }
 }
 export const audioCtx = () => (enabled ? audio() : null);
+// For reading aloud on request: works even when the sound effects are switched off.
+export const audioCtxAny = () => audio();
 
 function tone(freq, start, dur, type = 'sine', vol = 0.12) {
   const c = audio();

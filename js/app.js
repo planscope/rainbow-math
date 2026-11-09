@@ -1,14 +1,14 @@
 // Mila's Rainbow Math Adventure: screens and interaction.
-import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js?v=17';
-import * as M from './model.js?v=17';
-import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=17';
-import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL } from './levels.js?v=17';
-import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=17';
-import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=17';
-import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults, loadPlayers, savePlayers, addPlayer, removePlayer, pinHash } from './store.js?v=17';
-import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking as stopDeviceSpeech, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=17';
-import { playLine, playExplain, playSequence, stopClips, preloadLines, unlockMedia, voiceInfo, voiceNames } from './voice.js?v=17';
-import { lineText, explainFor, readSequence } from './voicelines.js?v=17';
+import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL } from './math.js?v=18';
+import * as M from './model.js?v=18';
+import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=18';
+import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL } from './levels.js?v=18';
+import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=18';
+import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=18';
+import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults, loadPlayers, savePlayers, addPlayer, removePlayer, pinHash } from './store.js?v=18';
+import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking as stopDeviceSpeech, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=18';
+import { playLine, playExplain, playSequence, stopClips, preloadLines, unlockMedia, voiceInfo, voiceNames } from './voice.js?v=18';
+import { lineText, explainFor, readSequence } from './voicelines.js?v=18';
 const stopSpeaking = () => { stopDeviceSpeech(); stopClips(); };
 
 // ---------------------------------------------------------------- setup
@@ -32,8 +32,8 @@ let data = guestData();
 setSound(data.settings.sound);
 
 function guestData() {
-  // before anyone logs in: use the language of whoever played last
-  let lang = 'es';
+  // before anyone logs in: English first (Spanish is the second language)
+  let lang = 'en';
   if (players.last) { const d = load(players.last); lang = d.settings.lang || lang; }
   const g = load(null);
   g.settings.lang = lang;
@@ -1196,7 +1196,8 @@ function readProblem() {
   parts.push(T('whatIs', { a: p.a, b: p.b, opw: opWord(p.op) }));
   const text = parts.join(' ');
   // English: read with the recorded voice (joined pieces); otherwise the device voice
-  const ids = data.settings.sound && data.settings.coachVoiceKind !== 'device' ? readSequence(L(), p, c.story) : null;
+  unlockMedia();
+  const ids = data.settings.coachVoiceKind !== 'device' ? readSequence(L(), p, c.story) : null;
   if (!ids) { readAloud(text); return; }
   playSequence(ids).then((ok) => { if (!ok) readAloud(text); });
 }
@@ -2435,7 +2436,7 @@ function voiceCheck() {
     h('div', { class: 'rm-field-l' }, T('vc_title')),
     h('p', { class: 'rm-small' }, T('vc_voice', { lang: lang === 'es' ? 'Español' : 'English', who: (voiceNamesCache && voiceNamesCache[lang]) || '\u2026' })),
     h('p', { class: 'rm-small' }, `${T('vc_last')}: ${last}`),
-    h('p', { class: 'rm-small' }, `iPad: ${vi.ios ? T('p_on') : T('p_off')} \u00b7 ${T('p_sound')}: ${data.settings.sound ? T('p_on') : T('p_off')} \u00b7 v17${vi.unlockError ? ` \u00b7 unlock: ${vi.unlockError}` : ''}${vi.mediaError ? ` \u00b7 player: ${vi.mediaError}` : ''}`),
+    h('p', { class: 'rm-small' }, `iPad: ${vi.ios ? T('p_on') : T('p_off')} \u00b7 ${T('p_sound')}: ${data.settings.sound ? T('p_on') : T('p_off')} \u00b7 v18${vi.unlockError ? ` \u00b7 unlock: ${vi.unlockError}` : ''}${vi.mediaError ? ` \u00b7 player: ${vi.mediaError}` : ''}`),
     button(T('vc_test'), () => { unlockMedia(); unlockAudio(); sayLine('hello'); setTimeout(() => { if (screen === 'parent') update(); }, 1200); }, { cls: 'small', ic: 'read', k: 'vc-test' }));
 }
 

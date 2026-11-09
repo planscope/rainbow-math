@@ -1,6 +1,6 @@
 // Saved data lives only in this browser (localStorage). Every access is
 // wrapped so the app still works when storage is blocked.
-import { NEXT_SKILL, BASE_SKILL, MAX_LEVEL } from './math.js?v=17';
+import { NEXT_SKILL, BASE_SKILL, MAX_LEVEL } from './math.js?v=18';
 
 // Each player (Mila, and classmates who play on this device) has their own saved data.
 // Nothing leaves the device: no accounts, no server.
@@ -120,7 +120,15 @@ export function load(id) {
     window.localStorage.removeItem(`${PLAYERS_KEY}:probe`);
   } catch (e) { storageOK = false; }
   const raw = id ? readJSON(playerKey(id)) : null;
-  return raw ? merge(defaults(), raw) : defaults();
+  if (raw && !raw.enFirst) {
+    // English is the main language: switch everyone to English once (Spanish stays one tap away).
+    raw.enFirst = true;
+    raw.settings = { ...(raw.settings || {}), lang: 'en' };
+    writeJSON(playerKey(id), raw);
+  }
+  const d = raw ? merge(defaults(), raw) : defaults();
+  d.enFirst = true;
+  return d;
 }
 
 export function save(data) {

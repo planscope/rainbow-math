@@ -2,8 +2,8 @@
 // tools/eleven.mjs). Each line is one whole recording, so it sounds natural.
 // The app never calls ElevenLabs. If a recording is missing it says false and
 // the app uses the device voice instead.
-import { audioCtx, stopSpeaking } from './audio.js?v=17';
-import { clipId, variants, explainId } from './voicelines.js?v=17';
+import { audioCtx, audioCtxAny, stopSpeaking } from './audio.js?v=18';
+import { clipId, variants, explainId } from './voicelines.js?v=18';
 
 // iPad/iPhone play the recordings with a regular audio player (the kind videos use):
 // it is not silenced by the mute switch the way Web Audio can be.
@@ -48,7 +48,7 @@ let token = 0;
 // Everyone waits for the same download (two lines asked at once both get the list).
 function loadManifest() {
   if (!manifestLoading) {
-    manifestLoading = fetch(new URL('../audio/manifest.json?v=17', import.meta.url))
+    manifestLoading = fetch(new URL('../audio/manifest.json?v=18', import.meta.url))
       .then((r) => (r.ok ? r.json() : null))
       .then((m) => { manifest = m; return m; })
       .catch(() => null); // no recordings: device voice is used
@@ -142,10 +142,10 @@ export async function playSequence(ids) {
       return true;
     } catch (e) { voiceInfo.mediaError = e && e.name; }
   }
-  const ctx = audioCtx();
-  if (!ctx) return false;
+  const ctx = audioCtxAny();
+  if (!ctx) { voiceInfo.last = { how: 'device', key: 'read', reason: 'no Web Audio' }; return false; }
   let bufs;
-  try { bufs = await Promise.all(files.map((f) => getBuffer(ctx, f))); } catch (e) { return false; }
+  try { bufs = await Promise.all(files.map((f) => getBuffer(ctx, f))); } catch (e) { voiceInfo.last = { how: 'device', key: 'read', reason: `could not load (${e && e.message})` }; return false; }
   if (my !== token) return true;
   let t = ctx.currentTime + 0.03;
   let last = null;

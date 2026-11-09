@@ -159,7 +159,7 @@ export const clipId = (lang, key, v = null, variant = 0) => `${lang}-${key}${v =
 
 // Every recording: { id: { lang, key, v, text } }
 export function allLines() {
-  const out = { ...allExplanations('en'), ...allReadPieces('en') };
+  const out = { ...allExplanations('en'), ...allReadPieces('en'), ...allReadPieces('es') };
   for (const lang of ['en', 'es']) {
     for (const [key, line] of Object.entries(LINES)) {
       const n = variants(lang, key).length;
@@ -176,8 +176,8 @@ export function allLines() {
 // her screen ("Nine plus two... how many is that?"). Each explanation is recorded whole,
 // once per number combination that can really happen (found from the step builder).
 // Only the numbers a line needs are used, so there are about 430 English recordings.
-import { buildSteps } from './math.js?v=17';
-import { buildMulSteps } from './mult.js?v=17';
+import { buildSteps } from './math.js?v=18';
+import { buildMulSteps } from './mult.js?v=18';
 
 export const EXPLAIN = {
   x_ones_sum: { from: 'w_ones_sum', params: ['x', 'y'], en: "[curious] Let's add the ones. {x} plus {y}... how many is that?" },
@@ -247,15 +247,27 @@ export function allExplanations(lang = 'en') {
 // ---------------------------------------------------------------- "Read to me" (English)
 // Problems and stories have different numbers every time, so "Read to me" joins short
 // recordings: the story pieces between the numbers, the numbers 0-100, and "What is ... plus ...?".
-import { STORIES } from './i18n.js?v=17';
+import { STORIES } from './i18n.js?v=18';
 
 const OPN = { '+': 'add', '-': 'sub', '×': 'mul' };
 const READ_WORDS = {
-  what: { en: 'What is' },
-  plus: { en: 'plus' },
-  minus: { en: 'minus' },
-  times: { en: 'times' },
+  what: { en: 'What is', es: '¿Cuánto es' },
+  plus: { en: 'plus', es: 'más' },
+  minus: { en: 'minus', es: 'menos' },
+  times: { en: 'times', es: 'por' },
 };
+
+const ES_ONES = ['cero', 'uno', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho', 'nueve', 'diez', 'once', 'doce',
+  'trece', 'catorce', 'quince', 'dieciséis', 'diecisiete', 'dieciocho', 'diecinueve', 'veinte', 'veintiuno', 'veintidós',
+  'veintitrés', 'veinticuatro', 'veinticinco', 'veintiséis', 'veintisiete', 'veintiocho', 'veintinueve'];
+const ES_TY = ['', '', '', 'treinta', 'cuarenta', 'cincuenta', 'sesenta', 'setenta', 'ochenta', 'noventa'];
+export function esWords(n) {
+  if (n === 100) return 'cien';
+  if (n < 30) return ES_ONES[n];
+  const t = Math.floor(n / 10), o = n % 10;
+  return o ? `${ES_TY[t]} y ${ES_ONES[o]}` : ES_TY[t];
+}
+const numWords = (lang, n) => (lang === 'es' ? esWords(n) : enWords(n));
 
 function storyParts(lang, op, i) {
   const t = (STORIES[op][i] || {})[lang];
@@ -265,7 +277,7 @@ function storyParts(lang, op, i) {
 
 export function allReadPieces(lang = 'en') {
   const out = {};
-  for (let n = 0; n <= 100; n++) out[`${lang}-rd-n${n}`] = { lang, key: 'rd', text: enWords(n) };
+  for (let n = 0; n <= 100; n++) out[`${lang}-rd-n${n}`] = { lang, key: 'rd', text: numWords(lang, n) };
   for (const [k, w] of Object.entries(READ_WORDS)) out[`${lang}-rd-${k}`] = { lang, key: 'rd', text: w[lang] };
   for (const op of Object.keys(OPN)) {
     (STORIES[op] || []).forEach((_, i) => {
@@ -280,7 +292,7 @@ export function allReadPieces(lang = 'en') {
 
 // The recordings for reading one problem (story first, if there is one), or null.
 export function readSequence(lang, p, storyIdx) {
-  if (lang !== 'en') return null;
+  if (lang !== 'en' && lang !== 'es') return null;
   const ids = [];
   const num = (n) => (Number.isInteger(n) && n >= 0 && n <= 100 ? `${lang}-rd-n${n}` : null);
   if (storyIdx != null) {
