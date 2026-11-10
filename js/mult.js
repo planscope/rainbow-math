@@ -7,13 +7,26 @@ const pickOf = (rng, arr) => arr[Math.floor(rng() * arr.length)];
 // level 1: 2–3 groups of 2, 5 or 10 (easy to count by)
 // level 2: 2–5 groups of 2, 3, 4, 5 or 10
 // level 3: 2–5 groups of 2–5 or 10, shown as rows (arrays)
+// level 4: times tables of 2, 5 and 10 (up to 10 rows)
+// level 5: times tables of 3 and 4 (up to 10 rows)
+// level 6: the big tables, 6 to 9 (up to 6 rows)
+export const MUL_LEVELS = 6;
+const MUL_RULE = {
+  1: { a: [2, 3], b: [2, 5, 10] },
+  2: { a: [2, 5], b: [2, 3, 4, 5, 10, 2, 5] },
+  3: { a: [2, 5], b: [2, 3, 4, 5, 10] },
+  4: { a: [2, 10], b: [2, 5, 10] },
+  5: { a: [2, 10], b: [3, 4] },
+  6: { a: [2, 6], b: [6, 7, 8, 9] },
+};
 export function generateMul(level = 1, rng = Math.random, avoidKeys = []) {
-  const lvl = Math.max(1, Math.min(3, level | 0));
+  const lvl = Math.max(1, Math.min(MUL_LEVELS, level | 0));
+  const rule = MUL_RULE[lvl];
   const avoid = new Set(avoidKeys);
   let p = null;
   for (let i = 0; i < 60; i++) {
-    const a = lvl === 1 ? ri(rng, 2, 3) : ri(rng, 2, 5);
-    const b = lvl === 1 ? pickOf(rng, [2, 5, 10]) : pickOf(rng, [2, 3, 4, 5, 10, 2, 5]);
+    const a = ri(rng, rule.a[0], rule.a[1]);
+    const b = pickOf(rng, rule.b);
     p = {
       key: `${a}x${b}`,
       skill: 'M',
@@ -23,7 +36,7 @@ export function generateMul(level = 1, rng = Math.random, avoidKeys = []) {
       b,
       answer: a * b,
       regroup: false,
-      style: lvl === 3 ? 'rows' : 'groups',
+      style: lvl >= 3 ? 'rows' : 'groups',
     };
     if (!avoid.has(p.key)) return p;
   }
@@ -33,7 +46,7 @@ export function generateMul(level = 1, rng = Math.random, avoidKeys = []) {
 export function isValidMul(p) {
   return !!p && p.op === '×' && p.skill === 'M'
     && Number.isInteger(p.a) && Number.isInteger(p.b)
-    && p.a >= 2 && p.a <= 5 && p.b >= 2 && p.b <= 10
+    && p.a >= 2 && p.a <= 10 && p.b >= 2 && p.b <= 10
     && p.answer === p.a * p.b
     && (p.style === 'groups' || p.style === 'rows');
 }
@@ -54,6 +67,15 @@ export function buildMulSteps(p) {
     });
   }
   return steps;
+}
+
+// Every multiplication any level can ask (for recording the guide's explanations).
+export function allMulProblems() {
+  const out = new Map();
+  for (const r of Object.values(MUL_RULE)) {
+    for (let a = r.a[0]; a <= r.a[1]; a++) for (const b of new Set(r.b)) out.set(`${a}x${b}`, { a, b, answer: a * b });
+  }
+  return [...out.values()];
 }
 
 // Facts about a wrong answer (never a guess about why).

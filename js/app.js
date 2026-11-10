@@ -1,14 +1,15 @@
 // Mila's Rainbow Math Adventure: screens and interaction.
-import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL, mistakePattern } from './math.js?v=21';
-import * as M from './model.js?v=21';
-import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=21';
-import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL, QUIZ, passLevel, failQuiz, quizPlan } from './levels.js?v=21';
-import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=21';
-import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=21';
-import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults, loadPlayers, savePlayers, addPlayer, removePlayer, pinHash, helpLevel, recordFade, passedFade } from './store.js?v=21';
-import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking as stopDeviceSpeech, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=21';
-import { playLine, playExplain, playSequence, playParts, stopClips, preloadLines, unlockMedia, voiceInfo, voiceNames } from './voice.js?v=21';
-import { lineText, explainFor, readSequence } from './voicelines.js?v=21';
+import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL, mistakePattern } from './math.js?v=22';
+import * as M from './model.js?v=22';
+import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=22';
+import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL, QUIZ, passLevel, failQuiz, quizPlan, worldOf, WORLD_COUNT, migratePath } from './levels.js?v=22';
+import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=22';
+import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=22';
+import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults, loadPlayers, savePlayers, addPlayer, removePlayer, pinHash, helpLevel, recordFade, passedFade } from './store.js?v=22';
+import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking as stopDeviceSpeech, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=22';
+import { playLine, playExplain, playSequence, playParts, stopClips, preloadLines, unlockMedia, voiceInfo, voiceNames } from './voice.js?v=22';
+import { lineText, explainFor, readSequence } from './voicelines.js?v=22';
+import { LITTLE_LEVELS, LITTLE_WORLDS, littleWorldOf, makeLittle, pickLittle, OBJ_EMOJI } from './little.js?v=22';
 const stopSpeaking = () => { stopDeviceSpeech(); stopClips(); };
 
 // ---------------------------------------------------------------- setup
@@ -61,6 +62,27 @@ const opWord = (op) => (op === '+' ? W().plusWord : op === '\u00d7' ? W().timesW
 const isMul = () => !!play && play.p.op === '\u00d7';
 const validProblem = (p) => !!p && (p.op === '\u00d7' ? isValidMul(p) : isValidProblem(p));
 const rand = (n) => Math.floor(Math.random() * n);
+// 100 levels in 10 worlds: a level is called by its world ("Level 23: Borrowing a ten")
+const WORLD_ICONS = ['\u{1F33C}', '\u{1F680}', '\u{1F98A}', '\u{1F308}', '\u{1F36D}', '\u{1F3F0}', '\u{1F984}', '\u{1F30B}', '\u{1F319}', '\u{1F451}'];
+const lvName = (n) => T(`world${worldOf(n)}`);
+// Luna (4–5) plays in her own little world: her own 30 levels, pictures, and everything said out loud.
+const isLittle = () => !!(player && player.little);
+const LITTLE_ICONS = ['\u{1F33B}', '\u{1F98B}', '\u{1F319}'];
+const PIC = ['\u{1F436}', '\u{1F431}', '\u{1F98B}', '\u2B50', '\u{1F353}', '\u{1F308}', '\u{1F41F}', '\u{1F338}', '\u{1F366}'];
+const lvNewLittle = (n) => { const lv = levelInfo(n, LITTLE_LEVELS); return lv.step === 1 ? T(`lworldNew${lv.world}`) : lv.gate ? T('lvGateNew') : T('lvStepNew'); };
+// Which path the shared screens show: the big-kid 100 levels, or the little-kid 30.
+function P() {
+  return isLittle()
+    ? { path: data.progress.lpath, levels: LITTLE_LEVELS, worlds: LITTLE_WORLDS, icons: LITTLE_ICONS, name: (n) => T(`lworld${littleWorldOf(n)}`), fresh: lvNewLittle }
+    : { path: data.progress.path, levels: LEVELS, worlds: WORLD_COUNT, icons: WORLD_ICONS, name: lvName, fresh: lvNew };
+}
+let lplay = null; // the little-kid problem on screen
+function lvNew(n) {
+  const lv = levelInfo(n);
+  if (lv.step === 1) return T(`worldNew${lv.world}`);
+  if (lv.gate) return T('lvGateNew');
+  return T('lvStepNew');
+}
 
 // ---------------------------------------------------------------- DOM helpers
 function h(tag, attrs, ...kids) {
@@ -105,6 +127,7 @@ function render() {
   const focusKey = document.activeElement && root.contains(document.activeElement) ? document.activeElement.getAttribute('data-k') : null;
   root.setAttribute('lang', L());
   root.setAttribute('data-screen', screen);
+  root.setAttribute('data-kid', isLittle() ? 'little' : 'big');
   applyMotion();
   if (screen === 'play' && play && play.bubbleKey && data.active) play.bubble = play.bubbleKey(); // follows language changes
   computeCoach();
@@ -127,6 +150,7 @@ function render() {
     case 'parent': view = viewParent(); break;
     case 'quizIntro': view = viewQuizIntro(); break;
     case 'quizDone': view = viewQuizDone(); break;
+    case 'lplay': view = viewLittlePlay(); break;
     default: view = viewWelcome();
   }
   const coach = screen === 'play' && play && play.coach ? coachEls() : [];
@@ -449,7 +473,7 @@ function viewWelcome() {
   const returning = r.pieces > 0 || data.sessions.length > 0;
   return h('main', { class: 'rm-screen rm-welcome' },
     h('div', { class: 'rm-corner' }, langButton()),
-    h('h1', { class: 'rm-title' }, T('appName')),
+    h('h1', { class: 'rm-title' }, isLittle() ? T('appNameLittle') : T('appName')),
     rainbowBar(),
     h('div', { class: 'rm-welcome-scene', html: islandSVG({ pieces: r.pieces, friends: r.friends, rainbows: Math.floor(r.pieces / 7), star: r.star }) }),
     h('div', { class: 'rm-welcome-bubble' }, bubbleEl({ mood: 'happy', text: returning ? T('welcomeBack') : T('welcomeHi') })),
@@ -484,8 +508,9 @@ function viewWho() {
 }
 
 function pickPlayer(pl) {
-  pin = { target: pl, mode: pl.pin ? 'enter' : 'create', entry: '', first: '', msg: '', tries: 0, busy: false };
+  pin = { target: pl, pic: !!pl.little, mode: pl.pin ? 'enter' : 'create', entry: '', first: '', msg: '', tries: 0, busy: false };
   go('pin');
+  if (pl.little) sayLine('lu_pic');
 }
 
 function viewPin() {
@@ -493,10 +518,14 @@ function viewPin() {
   const pl = pin.target;
   if (!parent && !pl) return viewWho();
   const gate = parent && pin.mode === 'gate';
+  const pic = !parent && pin.pic;
+  const len = pic ? 3 : 4;
   const title = parent
     ? (gate ? T('pp_gate', { a: pin.ga, b: pin.gb }) : pin.mode === 'enter' ? T('pp_enter') : pin.mode === 'create' ? T('pp_create') : T('pp_confirm'))
-    : pin.mode === 'enter' ? T('pinHello', { who: pl.name }) : pin.mode === 'create' ? T('pinCreate') : T('pinConfirm');
+    : pic ? (pin.mode === 'enter' ? T('picHello', { who: pl.name }) : pin.mode === 'create' ? T('picCreate') : T('picConfirm'))
+      : pin.mode === 'enter' ? T('pinHello', { who: pl.name }) : pin.mode === 'create' ? T('pinCreate') : T('pinConfirm');
   const key = (d) => h('button', { type: 'button', class: 'rm-btn rm-key', 'data-k': `pin-${d}`, onclick: () => { unlockAudio(); pinPress(String(d)); } }, String(d));
+  const picKey = (e, i) => h('button', { type: 'button', class: 'rm-btn rm-key pic', 'data-k': `pin-${i}`, 'aria-label': e, onclick: () => { unlockAudio(); pinPress(String(i)); } }, e);
   const back = () => go(parent ? (pin.changing ? 'parent' : parentReturn || 'who') : 'who');
   return h('main', { class: `rm-screen rm-pin ${parent ? 'grown' : ''}` },
     h('div', { class: 'rm-row-top' }, button(T('back'), back, { cls: 'soft small', ic: 'back', k: 'back' }), langButton()),
@@ -505,10 +534,14 @@ function viewPin() {
     h('p', { class: 'rm-big-text' }, title),
     gate
       ? h('p', { class: 'rm-pin-typed', 'aria-live': 'polite' }, pin.entry || '\u00a0')
-      : h('div', { class: `rm-pin-dots ${pin.msg && pin.mode === 'enter' ? 'shake' : ''}`, role: 'img', 'aria-label': `${pin.entry.length} / 4` },
-        [0, 1, 2, 3].map((i) => h('span', { class: i < pin.entry.length ? 'on' : '' }))),
+      : h('div', { class: `rm-pin-dots ${pin.msg && pin.mode === 'enter' ? 'shake' : ''} ${pic ? 'pic' : ''}`, role: 'img', 'aria-label': `${pin.entry.length} / ${len}` },
+        Array.from({ length: len }, (_, i) => h('span', { class: i < pin.entry.length ? 'on' : '' }, pic && i < pin.entry.length ? PIC[Number(pin.entry[i])] : ''))),
     h('p', { class: 'rm-pin-msg', role: 'status' }, pin.msg || (gate ? T('pp_gateNote') : '\u00a0')),
-    h('div', { class: 'rm-keys rm-pin-keys' },
+    pic ? h('div', { class: 'rm-keys rm-pin-keys pics' },
+      PIC.map(picKey),
+      h('span'),
+      button(null, () => { pin.entry = pin.entry.slice(0, -1); update(); }, { cls: 'rm-key soft', ic: 'del', aria: T('del'), k: 'pin-del' }),
+      h('span')) : h('div', { class: 'rm-keys rm-pin-keys' },
       [1, 2, 3, 4, 5, 6, 7, 8, 9].map(key),
       button(null, () => { pin.entry = pin.entry.slice(0, -1); update(); }, { cls: 'rm-key soft', ic: 'del', aria: T('del'), k: 'pin-del' }),
       key(0),
@@ -529,12 +562,13 @@ async function pinPress(d) {
     update();
     return;
   }
-  if (pin.entry.length >= 4) return;
+  const len = pin.kind !== 'parent' && pin.pic ? 3 : 4;
+  if (pin.entry.length >= len) return;
   pin.entry += d;
   pin.msg = '';
   sfx.tap();
   update();
-  if (pin.entry.length < 4) return;
+  if (pin.entry.length < len) return;
   pin.busy = true;
   const pl = pin.target;
   const entered = pin.entry;
@@ -568,6 +602,7 @@ async function pinPress(d) {
 function login(pl) {
   player = players.players.find((x) => x.id === pl.id) || pl;
   data = load(player.id);
+  migratePath(data.progress.path);
   data.visits = (data.visits || 0) + 1;
   save(data);
   players.last = player.id;
@@ -577,9 +612,9 @@ function login(pl) {
   celebrate = null;
   if (data.active && data.active.current && validProblem(data.active.current.p)) initPlay();
   sfx.reward();
-  if (!data.progress.placed) { go('placeIntro'); sayLine('place_start'); return; }
+  if (!data.progress.placed && !isLittle()) { go('placeIntro'); sayLine('place_start'); return; }
   go('welcome');
-  sayLine('hello');
+  sayLine(isLittle() ? 'lu_hello' : 'hello');
 }
 
 function switchPlayer() {
@@ -608,6 +643,10 @@ function viewNewPlayer() {
     h('h2', { class: 'rm-h2' }, T('newTitle')),
     h('label', { class: 'rm-field-l' }, T('newName')),
     input,
+    h('div', { class: 'rm-field-l' }, T('newKind')),
+    h('div', { class: 'rm-kind-pick' },
+      h('button', { type: 'button', class: 'rm-kind', 'aria-pressed': String(!draft.little), 'data-k': 'kind-big', onclick: () => { draft.little = false; sfx.tap(); update(); } }, h('span', { 'aria-hidden': 'true' }, '\u{1F9EE}'), T('kindBig')),
+      h('button', { type: 'button', class: 'rm-kind', 'aria-pressed': String(!!draft.little), 'data-k': 'kind-little', onclick: () => { draft.little = true; sfx.tap(); update(); } }, h('span', { 'aria-hidden': 'true' }, '\u{1F33B}'), T('kindLittle'))),
     h('div', { class: 'rm-field-l' }, T('newFriend')),
     h('div', { class: 'rm-friend-pick' }, CREATURE_ORDER.map((f) => h('button', {
       type: 'button', class: 'rm-friend-opt', 'aria-pressed': String(draft.friend === f), 'aria-label': CREATURE_NAMES[f][L()], 'data-k': `fr-${f}`,
@@ -619,7 +658,7 @@ function viewNewPlayer() {
 function createPlayer() {
   const name = draft.name.trim().slice(0, 14);
   if (!name) return;
-  const id = addPlayer(players, { name, friend: draft.friend, lang: L() });
+  const id = addPlayer(players, { name, friend: draft.friend, lang: L(), little: !!draft.little });
   players = loadPlayers();
   pickPlayer(players.players.find((x) => x.id === id));
 }
@@ -627,7 +666,8 @@ function createPlayer() {
 // ---------------------------------------------------------------- first "what do you know" check
 // About 6 problems. It starts in the middle of the path and goes up after a right answer
 // and down after a miss (like looking for a page in a book), then picks the level.
-const PROBE = { 1: ['A', 1], 2: ['B', 1], 3: ['B', 2], 4: ['C', 1], 5: ['D', 1], 6: ['D', 2], 7: ['M', 1], 8: ['M', 2], 9: ['M', 3], 10: ['D', 3] };
+// The first check finds her world: one problem like each world's first level, binary search.
+const PROBE = { 1: ['A', 2], 2: ['C', 1], 3: ['D', 1], 4: ['D', 3], 5: ['M', 1], 6: ['M', 3], 7: ['M', 4], 8: ['M', 5], 9: ['M', 6], 10: ['M', 6] };
 
 function viewPlaceIntro() {
   return h('main', { class: 'rm-screen rm-celebrate rm-place' },
@@ -644,7 +684,7 @@ function placementRecord(ok) {
   const pl = s.place;
   if (ok) pl.pass = Math.max(pl.pass, pl.probe); else pl.fail = Math.min(pl.fail, pl.probe);
   pl.done++;
-  const top = data.settings.mult === false ? 6 : 10;
+  const top = data.settings.mult === false ? 4 : 10;
   const next = Math.floor((pl.pass + Math.min(pl.fail, top + 1)) / 2);
   if (pl.done >= 7 || next <= pl.pass || next >= Math.min(pl.fail, top + 1)) pl.finished = true;
   else pl.probe = next;
@@ -673,8 +713,8 @@ function placementMiss() {
 
 function finishPlacement() {
   const s = data.active;
-  const lvl = Math.max(1, s.place.pass);
-  data.progress.path = { level: lvl, stars: 0, best: Math.max(lvl, data.progress.path.best || 1) };
+  const lvl = Math.max(1, (Math.min(s.place.pass, WORLD_COUNT) - 1) * 10 + 1);
+  data.progress.path = { level: lvl, stars: 0, best: Math.max(lvl, data.progress.path.best || 1), v: 2 };
   data.progress.placed = true;
   data.active = null;
   play = null;
@@ -692,7 +732,7 @@ function viewPlaceDone() {
     h('div', { class: 'rm-lumi big', html: lumiSVG('cheer') }),
     h('div', { class: 'rm-levelup-badge' }, String(n)),
     h('h2', { class: 'rm-h2' }, T('placeDoneTitle', { n })),
-    h('p', { class: 'rm-big-text' }, T(`lv${n}`)),
+    h('p', { class: 'rm-big-text' }, lvName(n)),
     h('div', { class: 'rm-actions' }, button(T('placeDoneGo'), () => startSession('path'), { cls: 'primary big', ic: 'next', k: 'place-play' })));
 }
 
@@ -722,8 +762,9 @@ function prizeMini() {
   const have = data.rewards.pieces;
   const left = Math.max(0, pz.goal - have);
   const pct = Math.min(100, Math.round((have / pz.goal) * 100));
-  const from = play && play.bump ? Math.max(0, Math.round(((have - 1) / pz.goal) * 100)) : pct;
-  return h('div', { class: `rm-prize-mini ${play && play.bump ? 'bump' : ''} ${left <= 3 ? 'close' : ''}`, role: 'img', 'aria-label': `${pz.title}: ${T('prizeLeft', { n: left })}` },
+  const bumped = (play && play.bump) || (lplay && lplay.bump);
+  const from = bumped ? Math.max(0, Math.round(((have - 1) / pz.goal) * 100)) : pct;
+  return h('div', { class: `rm-prize-mini ${bumped ? 'bump' : ''} ${left <= 3 ? 'close' : ''}`, role: 'img', 'aria-label': `${pz.title}: ${T('prizeLeft', { n: left })}` },
     h('span', { class: 'rm-prize-mini-ic', 'aria-hidden': 'true' }, pz.icon),
     h('span', { class: 'rm-prize-mini-t' },
       h('b', null, T('prizeMore', { n: left, what: pz.title })),
@@ -732,21 +773,26 @@ function prizeMini() {
 
 // What's next on the path: stars to the quiz, or the quiz itself.
 function nextCard() {
-  if (!data.progress.placed) return null;
-  const path = data.progress.path;
-  const lv = levelInfo(path.level);
+  if (!data.progress.placed && !isLittle()) return null;
+  const ctx = P();
+  const path = ctx.path;
+  const lv = levelInfo(path.level, ctx.levels);
   if (path.quizDue) {
     return h('button', { type: 'button', class: 'rm-next-card quiz', 'data-k': 'next-quiz', onclick: () => { unlockAudio(); sfx.tap(); go('quizIntro'); sayLine('quiz_intro'); } },
       h('span', { class: 'rm-next-ic', 'aria-hidden': 'true' }, '\u{1F3C6}'),
-      h('span', { class: 'rm-next-t' }, h('b', null, T('nextQuiz')), h('small', null, T('pathLevel', { n: path.level, name: T(`lv${path.level}`) }))),
+      h('span', { class: 'rm-next-t' }, h('b', null, T('nextQuiz')), h('small', null, T('pathLevel', { n: path.level, name: ctx.name(path.level) }))),
       h('span', { class: 'rm-path-go', html: icon('next') }));
   }
   const text = path.champion ? T('nextChamp')
-    : path.stars < lv.goal ? T('nextStars', { n: lv.goal - path.stars, l: path.level })
+    : path.stars < lv.goal ? (lv.gate ? T('nextStars', { n: lv.goal - path.stars, l: path.level }) : T('nextLevelStars', { n: lv.goal - path.stars, l: path.level + 1 }))
       : T('nextWait', { n: path.quizWait || 0 });
-  return h('div', { class: 'rm-next-card' },
-    h('span', { class: 'rm-next-ic', 'aria-hidden': 'true' }, path.champion ? '\u{1F451}' : '\u{1F3C6}'),
-    h('span', { class: 'rm-next-t' }, h('b', null, text), starsRow(Math.min(path.stars, lv.goal), lv.goal)));
+  return h('button', { type: 'button', class: 'rm-next-card', 'data-k': 'next-path', onclick: () => { unlockAudio(); sfx.tap(); go('path'); } },
+    h('span', { class: 'rm-next-ic', 'aria-hidden': 'true' }, path.champion ? '\u{1F451}' : lv.gate ? '\u{1F3C6}' : ctx.icons[lv.world - 1]),
+    h('span', { class: 'rm-next-t' },
+      h('b', null, text),
+      h('small', null, T('pathLevel', { n: path.level, name: ctx.name(path.level) })),
+      starsRow(Math.min(path.stars, lv.goal), lv.goal)),
+    h('span', { class: 'rm-path-go', html: icon('next') }));
 }
 
 function checkPrizes() {
@@ -816,17 +862,20 @@ function pathCard() {
       h('span', { class: 'rm-path-badge' }, String(path.level)),
       h('span', { class: 'rm-path-text' },
         h('span', { class: 'rm-adv-title' }, T('pathTitle')),
-        h('span', { class: 'rm-path-name' }, T('pathLevel', { n: path.level, name: T(`lv${path.level}`) })),
+        h('span', { class: 'rm-path-name' }, T('pathLevel', { n: path.level, name: lvName(path.level) })),
         starsRow(path.stars, lv.goal)),
       h('span', { class: 'rm-path-go', html: icon('next') })),
     button(T('pathSee'), () => go('path'), { cls: 'small soft', ic: 'island', k: 'see-path' }));
 }
 
 function levelChip() {
-  const path = data.progress.path;
-  const lv = levelInfo(path.level);
+  const ctx = P();
+  const path = ctx.path;
+  const lv = levelInfo(path.level, ctx.levels);
   const pct = Math.round((Math.min(path.stars, lv.goal) / lv.goal) * 100);
-  return h('div', { class: `rm-level-chip ${play && play.starEarned ? 'bump' : ''}`, role: 'img', 'aria-label': `${T('levelChip', { n: path.level })}: ${T('pathStars', { s: path.stars, g: lv.goal })}` },
+  const bump = (play && play.starEarned) || (lplay && lplay.starEarned);
+  return h('div', { class: `rm-level-chip ${bump ? 'bump' : ''}`, role: 'img', 'aria-label': `${T('levelChip', { n: path.level })}: ${T('pathStars', { s: path.stars, g: lv.goal })}` },
+    h('span', { class: 'rm-level-ic', 'aria-hidden': 'true' }, ctx.icons[lv.world - 1]),
     h('b', null, T('levelChip', { n: path.level })),
     h('span', { class: 'rm-level-bar' }, h('span', { style: `width:${pct}%` })),
     h('span', { class: 'rm-level-n' }, h('span', { html: icon('star') }), `${path.stars}/${lv.goal}`),
@@ -835,37 +884,56 @@ function levelChip() {
 
 // ---------------------------------------------------------------- level path map & level up
 function viewPathMap() {
-  const path = data.progress.path;
+  const ctx = P();
+  const path = ctx.path;
+  const max = ctx.levels.length;
+  const cur = levelInfo(path.level, ctx.levels);
   return h('main', { class: 'rm-screen rm-pathmap' },
-    h('div', { class: 'rm-row-top' }, button(T('back'), () => go('choose'), { cls: 'soft small', ic: 'back', k: 'back' }), langButton()),
+    h('div', { class: 'rm-row-top' }, button(T('back'), () => go(isLittle() ? 'welcome' : 'choose'), { cls: 'soft small', ic: 'back', k: 'back' }), langButton()),
     h('h2', { class: 'rm-h2' }, T('pathMapTitle')),
-    h('ol', { class: 'rm-stones' }, LEVELS.map((lv) => {
-      const state = lv.n < path.level ? 'done' : lv.n === path.level ? 'here' : 'locked';
-      return h('li', { class: `rm-stone ${state}` },
-        h('span', { class: 'rm-stone-n' }, state === 'done' ? h('span', { html: icon('star') }) : String(lv.n)),
-        h('span', { class: 'rm-stone-t' },
-          h('b', null, T(`lv${lv.n}`)),
-          h('span', null, state === 'done' ? T('pathDone') : state === 'here' ? T('pathHere') : T('pathLocked'))),
-        h('span', { class: `rm-stone-quiz ${state} ${state === 'here' && path.quizDue ? 'due' : ''}`, title: T('pathQuiz') }, '\u{1F3C6}'),
-        state === 'here' ? h('span', { class: 'rm-stone-lumi', html: lumiSVG('happy') }) : null,
-        state === 'here' ? starsRow(path.stars, lv.goal) : null);
+    h('p', { class: 'rm-text' }, T('pathMapNote', { n: path.level, total: max })),
+    h('ol', { class: 'rm-worlds' }, Array.from({ length: ctx.worlds }, (_, w) => {
+      const lvs = ctx.levels.filter((lv) => lv.world === w + 1);
+      const last = lvs[lvs.length - 1];
+      const wState = last.n < path.level || (path.champion && last.n === max) ? 'done' : lvs[0].n <= path.level ? 'here' : 'locked';
+      return h('li', { class: `rm-world ${wState}` },
+        h('div', { class: 'rm-world-h' },
+          h('span', { class: 'rm-world-ic', 'aria-hidden': 'true' }, wState === 'locked' ? '\u{1F512}' : ctx.icons[w]),
+          h('span', { class: 'rm-world-t' }, h('small', null, T('worldN', { w: w + 1 })), h('b', null, ctx.name(lvs[0].n))),
+          wState === 'here' ? h('span', { class: 'rm-stone-lumi', html: lumiSVG('happy') }) : null),
+        h('div', { class: 'rm-world-dots' }, lvs.map((lv) => {
+          const st = lv.n < path.level || (path.champion && lv.n === max) ? 'done' : lv.n === path.level ? 'here' : 'locked';
+          return h('span', { class: `rm-wdot ${st} ${lv.gate ? 'gate' : ''} ${st === 'here' && path.quizDue ? 'due' : ''}`, title: `${T('levelChip', { n: lv.n })}${lv.gate ? ` · ${T('pathQuiz')}` : ''}` },
+            lv.gate ? '\u{1F3C6}' : st === 'done' ? h('span', { html: icon('star') }) : String(lv.n));
+        })),
+        wState === 'here' ? h('div', { class: 'rm-world-now' }, h('b', null, T('pathLevel', { n: path.level, name: ctx.name(path.level) })), starsRow(Math.min(path.stars, cur.goal), cur.goal)) : null);
     })),
-    path.level >= MAX_PATH_LEVEL ? h('p', { class: 'rm-text' }, T('pathTop')) : null,
-    h('div', { class: 'rm-actions' }, button(T('pathPlay'), () => startSession('path'), { cls: 'primary big', ic: 'next', k: 'path-play' })));
+    path.level >= max ? h('p', { class: 'rm-text' }, T('pathTop')) : null,
+    h('div', { class: 'rm-actions' }, button(T('pathPlay'), () => (isLittle() ? startLittle() : startSession('path')), { cls: 'primary big', ic: 'next', k: 'path-play' })));
 }
 
 function viewLevelUp() {
-  const n = (data.active && data.active.levelUp) || data.progress.path.level;
+  const ctx = P();
+  const n = (data.active && data.active.levelUp) || ctx.path.level;
   const conf = reduced() ? null : h('div', { class: 'rm-confetti', 'aria-hidden': 'true' },
     Array.from({ length: 28 }, (_, i) => h('span', { style: `--i:${i};--x:${(i * 37) % 100}` })));
-  const say = `${T('levelUpTitle', { n })} ${T(`lv${n}`)}. ${T(`lvNew${n}`)}`;
-  return h('main', { class: 'rm-screen rm-celebrate rm-levelup' },
+  const lv = levelInfo(n, ctx.levels);
+  const newWorld = lv.step === 1 && n > 1;
+  const say = `${T('levelUpTitle', { n })} ${newWorld ? T('worldUnlocked', { w: lv.world, name: ctx.name(n) }) : ctx.name(n)}. ${ctx.fresh(n)}`;
+  return h('main', { class: `rm-screen rm-celebrate rm-levelup ${newWorld ? 'new-world' : ''}` },
     conf,
+    newWorld ? h('div', { class: 'rm-world-banner' }, h('span', { 'aria-hidden': 'true' }, ctx.icons[lv.world - 1]), T('worldUnlocked', { w: lv.world, name: ctx.name(n) })) : null,
     h('div', { class: 'rm-lumi big', html: lumiSVG('cheer') }),
-    h('div', { class: 'rm-levelup-badge' }, String(n)),
+    h('div', { class: 'rm-levelup-jump', 'aria-hidden': 'true' },
+      h('span', { class: 'rm-levelup-old' }, String(n - 1)),
+      h('span', { class: 'rm-levelup-arrow' }, '→'),
+      h('div', { class: 'rm-levelup-badge' }, String(n))),
     h('h2', { class: 'rm-h2' }, T('levelUpTitle', { n })),
-    h('p', { class: 'rm-big-text' }, T(`lv${n}`)),
-    h('p', { class: 'rm-text' }, T(`lvNew${n}`)),
+    h('p', { class: 'rm-big-text' }, ctx.name(n)),
+    h('div', { class: 'rm-world-dots big', role: 'img', 'aria-label': T('worldProgress', { k: lv.step, w: lv.world }) },
+      ctx.levels.filter((x) => x.world === lv.world).map((x) => h('span', { class: `rm-wdot ${x.n < n ? 'done' : x.n === n ? 'here' : 'locked'} ${x.gate ? 'gate' : ''}` },
+        x.gate ? '\u{1F3C6}' : x.n < n ? h('span', { html: icon('star') }) : String(x.n)))),
+    h('p', { class: 'rm-text' }, ctx.fresh(n)),
     h('div', { class: 'rm-actions' },
       button(null, () => readAloud(say), { cls: 'icon soft', ic: 'read', aria: T('read'), k: 'read' }),
       button(T('levelUpGo'), afterLevelUp, { cls: 'primary big', ic: 'next', k: 'levelup-go' })));
@@ -901,6 +969,7 @@ function groupsPanel() {
   const p = play.p;
   const k = play.mulCounted;
   const guided = play.status === 'guided';
+  const solvedAll = play.status === 'solved';
   const rows = p.style === 'rows';
   const groups = Array.from({ length: p.a }, (_, i) => {
     const lit = i < k;
@@ -914,9 +983,10 @@ function groupsPanel() {
       onclick: () => tapGroup(),
     },
     h('span', { class: 'rm-gems' }, gems),
-    h('span', { class: 'rm-group-n' }, lit ? String((i + 1) * p.b) : ''));
+    // the running total is hers to say: only shown for groups she already counted in Help, or when solved
+    h('span', { class: 'rm-group-n' }, solvedAll || (guided && i < k - 1) ? String((i + 1) * p.b) : lit ? '\u2714' : ''));
   });
-  const hint = k >= p.a && !guided ? T('mulCounted', { n: p.answer }) : T(rows ? 'mulTapRows' : 'mulTapGroups', { b: p.b });
+  const hint = k >= p.a && !guided && !solvedAll ? T('mulAllTapped') : T(rows ? 'mulTapRows' : 'mulTapGroups', { b: p.b });
   return h('div', { class: 'rm-card rm-blocks rm-groups-panel' },
     h('p', { class: 'rm-mat-line' }, hint),
     h('div', { class: `rm-groups ${rows ? 'rows' : ''}` }, groups),
@@ -966,6 +1036,7 @@ function submitMulEntry() {
 }
 
 function startFlow() {
+  if (isLittle()) { startLittle(); return; }
   if (!data.progress.placed) { go('placeIntro'); sayLine('place_start'); return; }
   const pr = data.settings.practice;
   if (['path', 'add', 'sub', 'mix', 'mul'].includes(pr)) startSession(pr);
@@ -1007,6 +1078,14 @@ function resumeSession() {
   if (!s) return startFlow();
   if (s.prizeWon) { go('prize'); sayLine('prize'); return; }
   if (s.levelUp) { go('levelup'); sayLine('levelup'); return; }
+  if (s.mode === 'little' || s.mode === 'lquiz') {
+    if (s.quizNext) return endForQuiz();
+    if (s.index >= s.length || !s.current) return lContinue();
+    lInit();
+    go('lplay');
+    lSay();
+    return;
+  }
   if (s.mode === 'placement' && (s.place.finished || s.index >= s.length)) return finishPlacement();
   if (s.quizNext) return endForQuiz();
   if (s.mode === 'quiz' && s.index >= s.length) return finishQuiz();
@@ -1967,7 +2046,9 @@ function solve() {
     if (s.mode === 'path') {
       const r = recordPath(data.progress.path, independent);
       if (independent) play.starEarned = true;
-      if (r.quizNow) { s.quizNext = true; s.repeatSkill = null; s.note = null; } // a full row of stars: quiz time
+      if (r.quizNow) { s.quizNext = true; s.repeatSkill = null; s.note = null; } // a quiz level is full: quiz time
+      if (r.leveledUp) { s.levelUp = r.level; s.repeatSkill = null; s.note = null; }
+      play.pathNote = independent ? starsNote() : null;
     }
     if (note.eased) {
       s.note = 'support';
@@ -1989,7 +2070,8 @@ function solve() {
       : c.wrongs > 0 && !c.helped ? 'p_fixed'
         : p.regroup ? 'p_onesCareful'
           : play.movedBlocks ? 'p_blocks' : null;
-  setBubble(() => solvedBubble({ wasGuided, independent, pickN, praiseKey }));
+  const pathNote = play.pathNote;
+  setBubble(() => { const b = solvedBubble({ wasGuided, independent, pickN, praiseKey }); if (pathNote) b.text = `${b.text ? `${b.text} ` : ''}${T(pathNote.key, pathNote)}`; return b; });
   sfx.correct();
   if (wasGuided || !c.independent) sayLine('team'); else cheer();
   if (play.sayPrizeClose) {
@@ -1999,9 +2081,44 @@ function solve() {
   }
   setTimeout(() => sfx.reward(), 450);
   update();
+  if (play.starEarned) flyStar();
   play.bump = false;
   play.starEarned = false;
   burst();
+  if (pathNote && pathNote.left === 1 && !s.levelUp && !s.quizNext) {
+    const me = play;
+    setTimeout(() => { if (play === me && screen === 'play') sayLine('one_more_star'); }, 2300);
+  }
+}
+
+// After a star: "2 more stars to Level 24!" (or to the quiz, or "Level up!").
+function starsNote() {
+  const path = data.progress.path;
+  const s = data.active;
+  if (s.levelUp) return { key: 'noteLevelUp', n: s.levelUp };
+  if (s.quizNext) return { key: 'noteQuiz' };
+  const lv = levelInfo(path.level);
+  const left = lv.goal - path.stars;
+  if (left <= 0 || path.champion) return null;
+  return { key: `${lv.gate ? 'noteToQuiz' : 'noteToLevel'}${left === 1 ? '1' : ''}`, n: left, l: path.level + 1, left };
+}
+
+// A star flies from the problem up into the level chip.
+function flyStar() {
+  if (reduced()) return;
+  const chip = root.querySelector('.rm-level-chip');
+  const from = root.querySelector('.rm-eq') || root.querySelector('.rm-problem') || root.querySelector('.lu-scene');
+  if (!chip || !from) return;
+  const a = from.getBoundingClientRect(), b = chip.getBoundingClientRect();
+  const el = h('div', { class: 'rm-flystar', 'aria-hidden': 'true', html: icon('star'), style: `left:${a.left + a.width / 2 - 24}px;top:${a.top + a.height / 2 - 24}px` });
+  root.append(el);
+  if (typeof el.animate !== 'function') { el.remove(); return; }
+  const dx = b.left + b.width / 2 - (a.left + a.width / 2), dy = b.top + b.height / 2 - (a.top + a.height / 2);
+  el.animate([
+    { transform: 'translate(0, 0) scale(.4) rotate(0deg)', opacity: 0 },
+    { transform: 'translate(0, -30px) scale(1.6) rotate(-20deg)', opacity: 1, offset: 0.3 },
+    { transform: `translate(${dx}px, ${dy}px) scale(.6) rotate(200deg)`, opacity: 1 },
+  ], { duration: 1100, easing: 'cubic-bezier(.5, 0, .3, 1)' }).onfinish = () => { el.remove(); const c = root.querySelector('.rm-level-chip'); if (c) { c.classList.remove('bump'); void c.offsetWidth; c.classList.add('bump'); } };
 }
 
 function solvedBubble(info) {
@@ -2052,6 +2169,7 @@ function goNext() {
 function continueSession() {
   const s = data.active;
   if (!s) { go('welcome'); return; }
+  if (s.mode === 'little' || s.mode === 'lquiz') { lContinue(); return; }
   if (s.quizNext) { endForQuiz(); return; }
   if (s.mode === 'quiz' && s.index >= s.length) { finishQuiz(); return; }
   if (s.index >= s.length) finishSession();
@@ -2064,6 +2182,335 @@ function afterLevelUp() {
   s.levelUp = null;
   save(data);
   continueSession();
+}
+
+// ---------------------------------------------------------------- Luna's world (little kids, 4–5)
+// Pictures to count, numbers to find, and adding / taking away with pictures. She answers
+// by tapping big buttons, and everything is said out loud. Tapping a picture counts it aloud.
+function startLittle(quiz = false) {
+  const lp = data.progress.lpath;
+  stopSpeaking();
+  play = null;
+  data.active = {
+    id: Date.now().toString(36) + rand(1000),
+    mode: quiz ? 'lquiz' : 'little',
+    length: quiz ? QUIZ.size : 5,
+    index: 0,
+    results: [],
+    used: [],
+    current: null,
+    finished: false,
+    quiz: quiz ? { level: lp.level, counts: !!lp.quizDue, items: [] } : null,
+  };
+  lNew();
+  go('lplay');
+  lSay();
+}
+
+function lNew() {
+  const s = data.active;
+  const [skill, max] = pickLittle(data.progress.lpath.level, Math.random, s.mode === 'lquiz');
+  const p = makeLittle(skill, max, Math.random, s.used);
+  s.current = { p, wrongs: 0, solved: false, awarded: false, picked: [] };
+  s.used.push(p.key);
+  save(data);
+  lInit();
+}
+
+function lInit() {
+  const c = data.active.current;
+  lplay = { status: c.solved ? 'solved' : 'ask', tapped: [], help: false, wrong: c.picked ? c.picked.slice() : [], show: false, bump: false, starEarned: false, leaving: false };
+}
+
+// Says the question in the recorded voice ("How many ducks? Count them, then tap the number!").
+function lSay() {
+  const s = data.active;
+  const p = s && s.current && s.current.p;
+  if (!p) return;
+  unlockMedia();
+  if (p.skill === 'count') sayLine(`lu_count_${p.obj}`);
+  else if (p.skill === 'find') sayLine('lu_find', p.n);
+  else if (p.skill === 'after') sayLine('lu_after', p.n);
+  else if (p.skill === 'before') sayLine('lu_before', p.n);
+  else sayLine(`lu_${p.skill}`);
+}
+
+function lQuestion(p) {
+  if (p.skill === 'count') return T('l_q_count', { obj: T(`obj_${p.obj}`) });
+  if (p.skill === 'find') return T('l_q_find', { n: p.n });
+  if (p.skill === 'after') return T('l_q_after', { n: p.n });
+  if (p.skill === 'before') return T('l_q_before', { n: p.n });
+  return T(`l_q_${p.skill}`);
+}
+
+// Tapping a picture counts it out loud: "one", "two", "three"...
+function lTapObj(i) {
+  if (!lplay || lplay.status !== 'ask' || lplay.tapped.includes(i)) return;
+  lplay.tapped.push(i);
+  sfx.pop();
+  update();
+  if (voiceOn()) { unlockMedia(); playSequence([`${L()}-rd-n${lplay.tapped.length}`]); }
+}
+
+function lAnswer(v) {
+  const s = data.active;
+  if (!s || !lplay || lplay.status !== 'ask' || lplay.wrong.includes(v)) return;
+  const c = s.current, p = c.p;
+  unlockAudio();
+  if (v === p.answer) { lSolve(); return; }
+  c.wrongs++;
+  c.picked.push(v);
+  lplay.wrong.push(v);
+  sfx.soft();
+  save(data);
+  if (c.wrongs >= 2) { lMiss(); return; }
+  if (s.mode !== 'lquiz') { lplay.help = true; lplay.tapped = []; sayLine('lu_help'); } else sayLine('quiz_check');
+  update();
+}
+
+function lItem(ok) {
+  const c = data.active.current, p = c.p;
+  return { key: p.key, skill: p.skill, little: true, ok, firstTry: ok && c.wrongs === 0, helped: false, tries: c.picked.slice(), answer: p.answer };
+}
+
+function lSolve() {
+  const s = data.active, c = s.current, p = c.p;
+  lplay.status = 'solved';
+  c.solved = true;
+  if (!c.awarded) {
+    c.awarded = true;
+    const key = `${s.id}:${s.index}`;
+    if (!data.rewards.awarded.includes(key)) {
+      data.rewards.pieces++;
+      data.rewards.awarded = [...data.rewards.awarded, key].slice(-80);
+      lplay.bump = true;
+      checkPrizes();
+    }
+    const st = data.progress.lstats[p.skill] || (data.progress.lstats[p.skill] = { tries: 0, first: 0 });
+    st.tries++;
+    if (c.wrongs === 0) st.first++;
+    s.results.push({ skill: p.skill, key: p.key, independent: true });
+    if (s.mode === 'lquiz') s.quiz.items.push(lItem(true));
+    else {
+      const r = recordPath(data.progress.lpath, true, LITTLE_LEVELS);
+      lplay.starEarned = true;
+      if (r.quizNow) s.quizNext = true;
+      if (r.leveledUp) s.levelUp = r.level;
+    }
+    save(data);
+  }
+  sfx.correct();
+  cheer();
+  setTimeout(() => sfx.reward(), 450);
+  update();
+  if (lplay.starEarned) flyStar();
+  lplay.bump = false;
+  lplay.starEarned = false;
+}
+
+// Two misses: the right button lights up, kindly, and on to the next one.
+function lMiss() {
+  const s = data.active, c = s.current, p = c.p;
+  lplay.status = 'solved';
+  lplay.show = true;
+  c.solved = true;
+  c.awarded = true;
+  const st = data.progress.lstats[p.skill] || (data.progress.lstats[p.skill] = { tries: 0, first: 0 });
+  st.tries++;
+  s.results.push({ skill: p.skill, key: p.key, independent: false });
+  if (s.mode === 'lquiz') s.quiz.items.push(lItem(false));
+  save(data);
+  sayLine('lu_show');
+  update();
+}
+
+function lNext() {
+  const s = data.active;
+  if (!s || !lplay || lplay.status !== 'solved' || lplay.leaving) return;
+  lplay.leaving = true;
+  stopSpeaking();
+  s.index++;
+  save(data);
+  if (s.prizeWon) { go('prize'); sayLine('prize'); return; }
+  if (s.levelUp) { go('levelup'); sayLine('levelup'); return; }
+  lContinue();
+}
+
+function lContinue() {
+  const s = data.active;
+  if (!s) { go('welcome'); return; }
+  if (s.quizNext) { endForQuiz(); return; }
+  if (s.mode === 'lquiz' && s.index >= s.length) { finishLittleQuiz(); return; }
+  if (s.index >= s.length) { lplay = null; finishSession(); return; }
+  lNew();
+  go('lplay');
+  lSay();
+}
+
+function finishLittleQuiz() {
+  const s = data.active;
+  if (!s || s.finished) return;
+  s.finished = true;
+  const q = s.quiz;
+  const lp = data.progress.lpath;
+  const n = q.items.length;
+  const k = q.items.filter((x) => x.ok).length;
+  const passed = n > 0 && k >= Math.ceil((QUIZ.pass / QUIZ.size) * n);
+  const date = new Date().toISOString();
+  data.quizzes = [{ date, level: q.level, n, k, passed, counted: q.counts, little: true, items: q.items }, ...(data.quizzes || [])].slice(0, 30);
+  data.sessions = [{ date, mode: 'lquiz', done: n, own: k, team: n - k }, ...data.sessions].slice(0, 30);
+  let wentUp = false, champion = false, bonus = 0;
+  const itsLevel = q.counts && lp.level === q.level;
+  if (passed) {
+    bonus = QUIZ.bonus;
+    data.rewards.pieces += bonus;
+    if (itsLevel) { const r = passLevel(lp, LITTLE_LEVELS); wentUp = !!r.leveledUp; champion = !!r.champion; }
+  } else if (itsLevel) failQuiz(lp);
+  checkPrizes();
+  quizResult = { k, n, passed, bonus, wentUp, levelUp: wentUp, champion, counted: itsLevel, prize: !!s.prizeWon, level: lp.level, wait: lp.quizWait || 0, items: q.items };
+  data.active = null;
+  lplay = null;
+  play = null;
+  save(data);
+  sfx.reward();
+  go('quizDone');
+  sayLine(passed ? 'quiz_pass' : 'quiz_more');
+}
+
+function viewLittlePlay() {
+  const s = data.active;
+  if (!s || !s.current) return viewWelcome();
+  const c = s.current, p = c.p;
+  if (!lplay) lInit();
+  const solved = lplay.status === 'solved';
+  const dots = Array.from({ length: s.length }, (_, i) => {
+    const done = i < s.index || (i === s.index && solved && !lplay.show);
+    return h('span', { class: `rm-dot ${done ? 'done' : ''} ${i === s.index ? 'now' : ''}`, html: done ? icon('star') : '' });
+  });
+  const n = data.rewards.pieces;
+  const quiz = s.mode === 'lquiz';
+  return h('main', { class: `rm-screen lu-play ${quiz ? 'quiz' : ''}` },
+    h('header', { class: 'rm-top' },
+      button(null, goHome, { cls: 'icon soft', ic: 'home', aria: T('home'), k: 'home' }),
+      h('div', { class: 'rm-dots', role: 'img', 'aria-label': T('problemOf', { i: Math.min(s.index + 1, s.length), n: s.length }) }, dots),
+      h('div', { class: `rm-pieces ${lplay.bump ? 'bump' : ''}`, role: 'img', 'aria-label': T('pieces', { n }) }, h('span', { html: pieceSVG(n) }), h('b', null, String(n))),
+      prizeMini(),
+      quiz ? h('div', { class: 'rm-level-chip quiz' }, h('span', { 'aria-hidden': 'true' }, '\u{1F3C6}'), h('b', null, T('quizChip'))) : levelChip(),
+      soundButton()),
+    h('div', { class: 'lu-ask' },
+      h('div', { class: `lu-friend ${solved && !lplay.show ? 'cheer' : ''}`, html: friendSVG((player && player.friend) || 'fox') }),
+      h('button', { type: 'button', class: 'lu-say', 'data-k': 'l-say', 'aria-label': T('l_listen'), onclick: () => { unlockAudio(); lSay(); } },
+        h('span', { class: 'lu-say-ic', html: icon('read') }),
+        h('b', null, lQuestion(p)))),
+    littleScene(p, solved),
+    p.skill === 'more' ? null : h('div', { class: 'lu-choices' }, p.choices.map((v) => h('button', {
+      type: 'button',
+      class: `lu-choice ${lplay.wrong.includes(v) ? 'wrong' : ''} ${solved && v === p.answer ? 'right' : ''} ${solved && v !== p.answer ? 'dim' : ''}`,
+      'data-k': `l-ch-${v}`,
+      disabled: solved || lplay.wrong.includes(v),
+      onclick: () => lAnswer(v),
+    }, String(v)))),
+    solved ? h('div', { class: 'lu-next-row' }, button(s.index + 1 >= s.length ? T('finish') : T('next'), lNext, { cls: 'primary big lu-next', ic: 'next', k: 'l-next' })) : null);
+}
+
+function littleScene(p, solved) {
+  const em = OBJ_EMOJI[p.obj] || '⭐';
+  const help = lplay.help && !solved ? 'help' : '';
+  const obj = (i, gone = false) => {
+    const k = lplay.tapped.indexOf(i);
+    return h('button', {
+      type: 'button', class: `lu-obj ${gone ? 'gone' : ''} ${k >= 0 ? 'counted' : ''}`, 'data-k': `l-obj-${i}`, 'aria-label': em,
+      disabled: gone || solved, style: `--d:${i * 40}ms`, onclick: () => lTapObj(i),
+    }, h('span', { class: 'lu-em' }, em), k >= 0 ? h('span', { class: 'lu-n' }, String(k + 1)) : null);
+  };
+  const rows = (items) => {
+    const out = [];
+    for (let i = 0; i < items.length; i += 5) out.push(h('div', { class: 'lu-row' }, items.slice(i, i + 5)));
+    return h('div', { class: 'lu-rows' }, out);
+  };
+  const range = (n, from = 0) => Array.from({ length: n }, (_, i) => from + i);
+  if (p.skill === 'count') {
+    return h('div', { class: `lu-scene ${help}` }, rows(range(p.n).map((i) => obj(i))),
+      help ? h('p', { class: 'lu-tip' }, T('l_tapCount')) : null);
+  }
+  if (p.skill === 'add') {
+    return h('div', { class: `lu-scene add ${help}` },
+      h('div', { class: 'lu-groups' },
+        h('div', { class: 'lu-group a' }, rows(range(p.a).map((i) => obj(i)))),
+        h('span', { class: 'lu-op', 'aria-hidden': 'true' }, '+'),
+        h('div', { class: 'lu-group b' }, rows(range(p.b, p.a).map((i) => obj(i))))),
+      h('p', { class: 'lu-eq' }, `${p.a} + ${p.b} = ${solved ? p.answer : '?'}`));
+  }
+  if (p.skill === 'sub') {
+    return h('div', { class: `lu-scene sub ${help}` },
+      rows(range(p.a).map((i) => obj(i, i >= p.a - p.b))),
+      h('p', { class: 'lu-eq' }, `${p.a} − ${p.b} = ${solved ? p.answer : '?'}`));
+  }
+  if (p.skill === 'more') {
+    const side = (key, count) => h('button', {
+      type: 'button',
+      class: `lu-side ${lplay.wrong.includes(key) ? 'wrong' : ''} ${solved && p.answer === key ? 'right' : ''} ${solved && p.answer !== key ? 'dim' : ''}`,
+      'data-k': `l-side-${key}`, 'aria-label': `${T('l_side')}: ${count}`,
+      disabled: solved || lplay.wrong.includes(key), onclick: () => lAnswer(key),
+    }, h('span', { class: 'lu-side-objs' }, Array.from({ length: count }, () => h('span', { class: 'lu-em' }, em))),
+    solved ? h('b', { class: 'lu-side-n' }, String(count)) : null);
+    return h('div', { class: 'lu-scene more' }, side('L', p.left), side('R', p.right));
+  }
+  if (p.skill === 'after' || p.skill === 'before') {
+    const known = h('span', { class: 'lu-card' }, String(p.n));
+    const q = h('span', { class: `lu-card q ${solved ? 'got' : ''}` }, solved ? String(p.answer) : '?');
+    return h('div', { class: 'lu-scene track' }, p.skill === 'after' ? [known, q] : [q, known]);
+  }
+  // find: just listen, then tap the number
+  return h('div', { class: 'lu-scene find' },
+    h('button', { type: 'button', class: 'lu-big-say', 'data-k': 'l-say-big', 'aria-label': T('l_listen'), onclick: () => { unlockAudio(); lSay(); } }, h('span', { html: icon('read') })));
+}
+
+function viewParentLittle() {
+  const st = data.settings;
+  const ls = data.progress.lstats || {};
+  const lp = data.progress.lpath;
+  const quizzes = data.quizzes || [];
+  const rows = ['count', 'find', 'more', 'add', 'sub', 'after', 'before'].filter((k) => ls[k] && ls[k].tries > 0).map((k) => h('tr', null,
+    h('th', { scope: 'row' }, T(`l_skill_${k}`)),
+    h('td', null, String(ls[k].tries)),
+    h('td', null, `${Math.round((ls[k].first / ls[k].tries) * 100)}%`)));
+  const itemText = (it) => `${it.ok ? '✔' : '✖'} ${T(`l_skill_${it.skill}`)}: ${(it.tries || []).length ? `${it.tries.join(', ')} → ` : ''}${it.answer === 'L' ? '⬅' : it.answer === 'R' ? '➡' : it.answer}`;
+  return h('main', { class: 'rm-screen rm-parent' },
+    h('div', { class: 'rm-row-top' },
+      h('h2', { class: 'rm-h2' }, `${T('p_title')} · ${player.name}`),
+      button(T('p_close'), () => go(parentReturn === 'parent' ? 'welcome' : parentReturn), { cls: 'soft small', ic: 'close', k: 'p-close' })),
+    parentMsg ? h('p', { class: 'rm-small ok', role: 'status' }, parentMsg) : null,
+    h('section', { class: 'rm-card rm-p-sec' },
+      h('h3', { class: 'rm-h3' }, T('p_lskills')),
+      h('p', { class: 'rm-small' }, T('p_littleNote')),
+      rows.length ? h('div', { class: 'rm-table-wrap' }, h('table', { class: 'rm-table' },
+        h('thead', null, h('tr', null, [T('p_skill'), T('p_lcolAll'), T('p_lcolRight')].map((x) => h('th', { scope: 'col' }, x)))),
+        h('tbody', null, rows))) : h('p', { class: 'rm-small' }, T('p_noSessions')),
+      h('h3', { class: 'rm-h3' }, T('p_quizzes')),
+      quizzes.length
+        ? h('ul', { class: 'rm-sessions rm-quizlist' }, quizzes.slice(0, 8).map((q) => h('li', null,
+          h('b', null, T('p_quizRow', { date: fmtDay(q.date), l: q.level, k: q.k, n: q.n, res: !q.counted ? `${T('p_checkOnly')}${q.passed ? ' ✔' : ''}` : q.passed ? T('p_passed') : T('p_notYet') })),
+          h('ul', null, (q.items || []).map((it) => h('li', { class: 'rm-small' }, itemText(it)))))))
+        : h('p', { class: 'rm-small' }, T('p_noQuizzes')),
+      button(T('p_quizNow'), () => go('quizIntro'), { cls: 'primary small', ic: 'star', k: 'p-quiz' })),
+    prizesSection(),
+    h('section', { class: 'rm-card rm-p-sec' },
+      levelPicker(T('p_path'), lp.level, LITTLE_LEVELS.length, (v) => { Object.assign(lp, { level: v, stars: 0, best: Math.max(lp.best || 1, v), quizDue: false, quizWait: 0, champion: false }); }, (n) => T(`lworld${littleWorldOf(n)}`)),
+      seg(T('p_lang'), st.lang, [['en', 'English'], ['es', 'Español']], (v) => { st.lang = v; }),
+      seg(T('p_sound'), st.sound, [[true, T('p_on')], [false, T('p_off')]], (v) => { st.sound = v; setSound(v); }),
+      seg(T('p_motion'), st.motion, [['auto', T('p_motionAuto')], ['reduce', T('p_motionReduce')]], (v) => { st.motion = v; }),
+      voiceCheck()),
+    h('section', { class: 'rm-card rm-p-sec' },
+      h('p', { class: 'rm-small' }, T('p_saveNote')),
+      button(T('p_changePin'), changeParentPin, { cls: 'small soft', ic: 'lock', k: 'p-change-pin' }),
+      parentConfirm
+        ? h('div', { class: 'rm-confirm', role: 'alertdialog', 'aria-label': T('p_reset') },
+          h('p', { class: 'rm-text' }, T('p_resetSure')),
+          h('div', { class: 'rm-actions' },
+            button(T('p_resetYes'), resetProgress, { cls: 'danger', k: 'reset-yes' }),
+            button(T('p_resetNo'), () => { parentConfirm = false; update(); }, { cls: 'soft', k: 'reset-no' })))
+        : button(T('p_reset'), () => { parentConfirm = true; update(); }, { cls: 'soft', ic: 'reset', k: 'reset' })));
 }
 
 // ---------------------------------------------------------------- quizzes
@@ -2082,17 +2529,18 @@ function endForQuiz() {
 }
 
 function viewQuizIntro() {
-  const n = data.progress.path.level;
-  const text = T('quizText', { n, k: QUIZ.size });
+  const ctx = P();
+  const n = ctx.path.level;
+  const text = isLittle() ? T('lquizText', { k: QUIZ.size }) : T('quizText', { n, k: QUIZ.size });
   return h('main', { class: 'rm-screen rm-celebrate rm-quizintro' },
     h('div', { class: 'rm-quiz-trophy', 'aria-hidden': 'true' }, '\u{1F3C6}'),
     h('h2', { class: 'rm-h2' }, T('quizTitle')),
-    h('p', { class: 'rm-big-text' }, T('pathLevel', { n, name: T(`lv${n}`) })),
+    h('p', { class: 'rm-big-text' }, T('pathLevel', { n, name: ctx.name(n) })),
     h('p', { class: 'rm-text' }, text),
     prizeStrip(true),
     h('div', { class: 'rm-actions' },
       button(null, () => readAloud(`${T('quizTitle')} ${text}`), { cls: 'icon soft', ic: 'read', aria: T('read'), k: 'read' }),
-      button(T('quizGo'), () => { unlockAudio(); stopSpeaking(); data.active = null; play = null; startSession('quiz'); }, { cls: 'primary big', ic: 'next', k: 'quiz-go' }),
+      button(T('quizGo'), () => { unlockAudio(); stopSpeaking(); data.active = null; play = null; if (isLittle()) startLittle(true); else startSession('quiz'); }, { cls: 'primary big', ic: 'next', k: 'quiz-go' }),
       button(T('quizLater'), () => go('welcome'), { cls: 'big', k: 'quiz-later' })));
 }
 
@@ -2683,7 +3131,7 @@ function viewCelebrate() {
       : h('p', { class: 'rm-text' }, T('celAllFriends')),
     h('div', { class: 'rm-actions' },
       button(null, () => readAloud([T('celTitle'), T('celSolved', { n: c.earned }), c.friend ? `${T('celFriend')} ${CREATURE_NAMES[c.friend][L()]}` : ''].join(' ')), { cls: 'icon soft', ic: 'read', aria: T('read'), k: 'read' }),
-      button(T('oneMore'), () => startSession(data.settings.practice === 'choose' ? c.mode : data.settings.practice), { cls: 'primary big', ic: 'next', k: 'more' }),
+      button(T('oneMore'), () => (isLittle() ? startLittle() : startSession(data.settings.practice === 'choose' ? c.mode : data.settings.practice)), { cls: 'primary big', ic: 'next', k: 'more' }),
       button(T('seeIsland'), () => go('island'), { cls: 'big', ic: 'island', k: 'island' }),
       button(T('allDone'), () => go('bye'), { cls: 'big', k: 'done' })));
 }
@@ -2723,12 +3171,23 @@ function seg(label, value, options, onPick) {
       }, text))));
 }
 
+// 100 levels: a dropdown instead of 100 buttons.
+function levelPicker(label, value, max, onPick, nameOf = lvName) {
+  return h('div', { class: 'rm-field' },
+    h('div', { class: 'rm-field-l' }, label),
+    h('select', {
+      class: 'rm-select', 'aria-label': label, 'data-k': 'level-select',
+      onchange: (e) => { onPick(Number(e.target.value)); parentMsg = ''; save(data); update(); },
+    }, Array.from({ length: max }, (_, i) => h('option', { value: String(i + 1), selected: i + 1 === value }, `${i + 1} \u00b7 ${nameOf(i + 1)}`))));
+}
+
 function playersSection() {
   return h('section', { class: 'rm-card rm-p-sec' },
     h('h3', { class: 'rm-h3' }, T('p_players')),
     h('ul', { class: 'rm-plist' }, players.players.map((pl) => h('li', null,
       h('span', { class: 'rm-plist-art', html: friendSVG(pl.friend || 'fox') }),
       h('b', null, pl.name),
+      h('span', { class: 'rm-small' }, pl.little ? T('kindLittle') : T('kindBig')),
       button(T('p_resetPin'), () => { pl.pin = null; savePlayers(players); parentMsg = T('p_pinReset'); update(); }, { cls: 'small soft', k: `pin-reset-${pl.id}`, disabled: !pl.pin }),
       pdel === pl.id
         ? h('span', { class: 'rm-confirm-inline' }, h('span', null, T('p_delSure', { who: pl.name })),
@@ -2770,6 +3229,7 @@ function prizesSection() {
 }
 
 function viewParent() {
+  if (player && isLittle()) return viewParentLittle();
   if (!player) {
     return h('main', { class: 'rm-screen rm-parent' },
       h('div', { class: 'rm-row-top' },
@@ -2797,7 +3257,7 @@ function viewParent() {
     prizesSection(),
     h('section', { class: 'rm-card rm-p-sec' },
       seg(T('p_practice'), st.practice, [['choose', T('p_choose')], ['path', T('p_path_opt')], ['add', T('p_add')], ['sub', T('p_sub')], ['mix', T('p_mix')], ['mul', T('p_mul_opt')]], (v) => { st.practice = v; }),
-      seg(T('p_path'), data.progress.path.level, LEVELS.map((lv) => [lv.n, String(lv.n)]), (v) => {
+      levelPicker(T('p_path'), data.progress.path.level, LEVELS.length, (v) => {
         const path = data.progress.path;
         path.level = v;
         path.stars = 0;
@@ -2806,7 +3266,7 @@ function viewParent() {
         path.quizWait = 0;
         path.champion = false;
       }),
-      h('p', { class: 'rm-small' }, `${T('pathLevel', { n: data.progress.path.level, name: T(`lv${data.progress.path.level}`) })}. ${T('p_pathNote')}`),
+      h('p', { class: 'rm-small' }, `${T('pathLevel', { n: data.progress.path.level, name: lvName(data.progress.path.level) })}. ${T('p_pathNote')}`),
       seg(T('p_mult'), st.mult !== false, [[true, T('p_on')], [false, T('p_off')]], (v) => { st.mult = v; }),
       button(T('p_replace'), () => { data.progress.placed = false; save(data); parentMsg = T('p_replaceDone'); update(); }, { cls: 'small soft', ic: 'reset', k: 'replace' }),
       seg(T('p_regroup'), st.regroup, [['off', T('p_reg_off')], ['auto', T('p_reg_auto')], ['now', T('p_reg_now')]], (v) => { st.regroup = v; }),
@@ -2942,7 +3402,7 @@ function voiceCheck() {
     h('div', { class: 'rm-field-l' }, T('vc_title')),
     h('p', { class: 'rm-small' }, T('vc_voice', { lang: lang === 'es' ? 'Español' : 'English', who: (voiceNamesCache && voiceNamesCache[lang]) || '\u2026' })),
     h('p', { class: 'rm-small' }, `${T('vc_last')}: ${last}`),
-    h('p', { class: 'rm-small' }, `iPad: ${vi.ios ? T('p_on') : T('p_off')} \u00b7 ${T('p_sound')}: ${data.settings.sound ? T('p_on') : T('p_off')} \u00b7 v21${vi.unlockError ? ` \u00b7 unlock: ${vi.unlockError}` : ''}${vi.mediaError ? ` \u00b7 player: ${vi.mediaError}` : ''}`),
+    h('p', { class: 'rm-small' }, `iPad: ${vi.ios ? T('p_on') : T('p_off')} \u00b7 ${T('p_sound')}: ${data.settings.sound ? T('p_on') : T('p_off')} \u00b7 v22${vi.unlockError ? ` \u00b7 unlock: ${vi.unlockError}` : ''}${vi.mediaError ? ` \u00b7 player: ${vi.mediaError}` : ''}`),
     button(T('vc_test'), () => { unlockMedia(); unlockAudio(); sayLine('hello'); setTimeout(() => { if (screen === 'parent') update(); }, 1200); }, { cls: 'small', ic: 'read', k: 'vc-test' }));
 }
 

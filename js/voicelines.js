@@ -125,6 +125,25 @@ export const LINES = {
   quiz_check: { en: ["[gently] Hmm, not quite. Check your work and try again!", "[gently] Almost! Look at it one more time."], es: '[gently] Mmm, todavía no. ¡Revisa tu trabajo e inténtalo otra vez!' },
   quiz_pass: { en: ["[excited] You passed the quiz! I knew you could do it!", "[excited] Woohoo! Quiz passed! You really learned it!"], es: '[excited] ¡Pasaste la prueba! ¡Sabía que podías!' },
   quiz_more: { en: ["[gently] Great trying! Let's practice a little more, and then try again.", "[cheerful] Good work! A little more practice and you'll get it!"], es: '[gently] ¡Muy buen intento! Practiquemos un poquito más y luego lo intentamos otra vez.' },
+  lu_count_star: { en: "[cheerful] How many stars? Count them, then tap the number!", es: '[cheerful] ¿Cuántas estrellas hay? ¡Cuéntalas y toca el número!' },
+  lu_count_apple: { en: "[cheerful] How many apples? Count them, then tap the number!", es: '[cheerful] ¿Cuántas manzanas hay? ¡Cuéntalas y toca el número!' },
+  lu_count_duck: { en: "[cheerful] How many ducks? Count them, then tap the number!", es: '[cheerful] ¿Cuántos patitos hay? ¡Cuéntalos y toca el número!' },
+  lu_count_balloon: { en: "[cheerful] How many balloons? Count them, then tap the number!", es: '[cheerful] ¿Cuántos globos hay? ¡Cuéntalos y toca el número!' },
+  lu_count_fish: { en: "[cheerful] How many fish? Count them, then tap the number!", es: '[cheerful] ¿Cuántos peces hay? ¡Cuéntalos y toca el número!' },
+  lu_count_butterfly: { en: "[cheerful] How many butterflies? Count them, then tap the number!", es: '[cheerful] ¿Cuántas mariposas hay? ¡Cuéntalas y toca el número!' },
+  lu_count_cupcake: { en: "[cheerful] How many cupcakes? Count them, then tap the number!", es: '[cheerful] ¿Cuántos pastelitos hay? ¡Cuéntalos y toca el número!' },
+  lu_count_flower: { en: "[cheerful] How many flowers? Count them, then tap the number!", es: '[cheerful] ¿Cuántas flores hay? ¡Cuéntalas y toca el número!' },
+  lu_find: { values: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20], en: '[cheerful] Can you find the number {v}? Tap it!', es: '[cheerful] ¿Puedes encontrar el número {v}? ¡Tócalo!' },
+  lu_after: { values: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19], en: '[curious] What number comes after {v}?', es: '[curious] ¿Qué número sigue después del {v}?' },
+  lu_before: { values: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20], en: '[curious] What number comes before {v}?', es: '[curious] ¿Qué número va antes del {v}?' },
+  lu_more: { en: ['[curious] Which side has more? Tap it!', '[cheerful] Look at both sides. Which one has more?'], es: '[curious] ¿Qué lado tiene más? ¡Tócalo!' },
+  lu_add: { en: ['[cheerful] Count them all together! How many in all?', '[happy] Put them together! How many are there now?'], es: '[cheerful] ¡Cuéntalos todos juntos! ¿Cuántos hay en total?' },
+  lu_sub: { en: ["[gasps] Some went away! How many are left?", "[cheerful] Bye-bye! How many are still here?"], es: '[gasps] ¡Algunos se fueron! ¿Cuántos quedan?' },
+  lu_help: { en: ["[gently] Let's count together! Tap each one.", '[gently] Let\'s count them slowly. Tap each one!'], es: '[gently] ¡Vamos a contar juntos! Toca cada uno.' },
+  lu_show: { en: ["[gently] It's this one! You'll get the next one.", "[gently] Look, it's this one! Let's try another."], es: '[gently] ¡Es este! El siguiente te va a salir.' },
+  lu_hello: { en: ["[excited] Hi there! Let's play with numbers!", '[happy] Yay, you came to play! Ready to count?'], es: '[excited] ¡Hola! ¡Vamos a jugar con los números!' },
+  lu_pic: { en: '[cheerful] Tap your three secret pictures!', es: '[cheerful] ¡Toca tus tres dibujos secretos!' },
+  one_more_star: { en: ['[excited] Just one more star to the next level!', '[happy] One more star and you level up!'], es: '[excited] ¡Solo una estrella más para el siguiente nivel!' },
   prize_close: { en: ["[excited] Almost there! Just a few more rainbow pieces for your prize!", "[gasps] You're so close to your prize! Keep going!"], es: '[excited] ¡Ya casi! ¡Unas piezas más de arcoíris para tu premio!' },
 };
 
@@ -138,7 +157,7 @@ function valueText(lang, line, v, forVoice) {
     return forVoice ? EN_BY[v] : `${v}s`;
   }
   if (!forVoice) return String(v);
-  return (lang === 'es' ? ES_NUM : EN_NUM)[v] ?? String(v);
+  return (lang === 'es' ? ES_NUM : EN_NUM)[v] ?? numWords(lang, v);
 }
 
 // A line can have several takes (different words), so the guide doesn't repeat itself.
@@ -181,8 +200,8 @@ export function allLines() {
 // her screen ("Nine plus two... how many is that?"). Each explanation is recorded whole,
 // once per number combination that can really happen (found from the step builder).
 // Only the numbers a line needs are used, so there are about 430 English recordings.
-import { buildSteps } from './math.js?v=21';
-import { buildMulSteps } from './mult.js?v=21';
+import { buildSteps } from './math.js?v=22';
+import { buildMulSteps, allMulProblems } from './mult.js?v=22';
 
 export const EXPLAIN = {
   x_ones_sum: { from: 'w_ones_sum', params: ['x', 'y'], en: "[curious] Let's add the ones. {x} plus {y}... how many is that?" },
@@ -247,14 +266,14 @@ export function allExplanations(lang = 'en') {
       if (a - b >= 0) buildSteps({ a, b, op: '-', answer: a - b }).forEach(addStep);
     }
   }
-  for (let a = 2; a <= 5; a++) for (const b of [2, 3, 4, 5, 10]) buildMulSteps({ a, b, answer: a * b }).forEach(addStep);
+  for (const m of allMulProblems()) buildMulSteps(m).forEach(addStep);
   return out;
 }
 
 // ---------------------------------------------------------------- "Read to me" (English)
 // Problems and stories have different numbers every time, so "Read to me" joins short
 // recordings: the story pieces between the numbers, the numbers 0-100, and "What is ... plus ...?".
-import { STORIES } from './i18n.js?v=21';
+import { STORIES } from './i18n.js?v=22';
 
 const OPN = { '+': 'add', '-': 'sub', '×': 'mul' };
 const READ_WORDS = {

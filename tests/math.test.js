@@ -203,7 +203,7 @@ test('no discouraging words in child-facing text', () => {
 
 // ---------------------------------------------------------------- level path & multiplication
 import { generateMul, isValidMul, buildMulSteps, analyzeMul } from '../js/mult.js';
-import { LEVELS, pickFromLevel, recordPath, MAX_PATH_LEVEL, passLevel, failQuiz, quizPlan, QUIZ } from '../js/levels.js';
+import { LEVELS, pickFromLevel, recordPath, MAX_PATH_LEVEL, passLevel, failQuiz, quizPlan, QUIZ, worldOf, migratePath } from '../js/levels.js';
 import { defaults, helpLevel, recordFade, passedFade } from '../js/store.js';
 
 test('multiplication problems stay small and friendly', () => {
@@ -225,56 +225,71 @@ test('multiplication help adds one group at a time', () => {
   assert.equal(analyzeMul({ a: 3, b: 4, answer: 12 }, 11).kind, 'm_count_hint');
 });
 
-test('the level path climbs with stars and mixes skills', () => {
+test('100 levels: stars climb, every 5th level has a quiz', () => {
+  assert.equal(LEVELS.length, 100);
+  assert.equal(MAX_PATH_LEVEL, 100);
+  assert.deepEqual(LEVELS.filter((l) => l.gate).map((l) => l.n), Array.from({ length: 20 }, (_, i) => (i + 1) * 5));
   const path = { level: 1, stars: 0, best: 1 };
   recordPath(path, false);
   assert.equal(path.stars, 0, 'help never removes or adds stars');
-  for (let i = 0; i < LEVELS[0].goal - 1; i++) assert.ok(!recordPath(path, true).quizNow);
-  assert.equal(path.level, 1);
+  for (let i = 0; i < LEVELS[0].goal - 1; i++) assert.ok(!recordPath(path, true).leveledUp);
+  const up = recordPath(path, true);
+  assert.ok(up.leveledUp && up.level === 2, 'a full row of stars climbs a normal level');
+  assert.equal(path.stars, 0);
+  path.level = 5;
+  for (let i = 0; i < LEVELS[4].goal - 1; i++) recordPath(path, true);
   const r = recordPath(path, true);
-  assert.ok(r.quizNow, 'a full row of stars opens the quiz');
-  assert.equal(path.level, 1, 'stars alone never climb a level');
+  assert.ok(r.quizNow && !r.leveledUp, 'level 5 ends with a quiz');
+  assert.equal(path.level, 5, 'stars alone never pass a quiz level');
   assert.ok(!recordPath(path, true).quizNow, 'the quiz is asked for once, then waits on the home screen');
   failQuiz(path);
-  assert.equal(path.stars, LEVELS[0].goal, 'a quiz that did not pass takes nothing away');
+  assert.equal(path.stars, LEVELS[4].goal, 'a quiz that did not pass takes nothing away');
   assert.ok(!recordPath(path, true).quizNow);
   assert.ok(!recordPath(path, true).quizNow);
   assert.ok(recordPath(path, true).quizNow, `the quiz comes back after ${QUIZ.wait} more stars`);
   assert.ok(passLevel(path).leveledUp);
-  assert.equal(path.level, 2);
-  assert.equal(path.stars, 0);
+  assert.equal(path.level, 6);
   assert.equal(path.quizDue, false);
   const rng = mulberry32(3);
   for (const lv of LEVELS) {
-    const seen = new Set();
-    for (let i = 0; i < 300; i++) {
+    assert.equal(lv.world, Math.ceil(lv.n / 10));
+    assert.equal(worldOf(lv.n), lv.world);
+    for (let i = 0; i < 60; i++) {
       const [sk, d] = pickFromLevel(lv.n, { rng });
       assert.ok(['A', 'B', 'C', 'D', 'M'].includes(sk));
-      assert.ok(d >= 1 && d <= 3);
-      seen.add(sk);
+      assert.ok(d >= 1 && d <= (sk === 'M' ? 6 : 3), `level ${lv.n} ${sk}${d}`);
+      if (sk === 'M') assert.ok(isValidMul(generateMul(d, rng)));
+      else assert.ok(isValidProblem(generateProblem(sk, d, rng)));
     }
-    if (lv.n >= 2) assert.ok(seen.size >= 2, `level ${lv.n} is mixed`);
   }
   for (let i = 0; i < 300; i++) {
-    assert.ok(!['C', 'D'].includes(pickFromLevel(6, { rng, regroupOn: false })[0]));
-    assert.notEqual(pickFromLevel(7, { rng, multOn: false })[0], 'M');
+    assert.ok(!['C', 'D'].includes(pickFromLevel(25, { rng, regroupOn: false })[0]));
+    assert.notEqual(pickFromLevel(61, { rng, multOn: false })[0], 'M');
   }
   const top = { level: MAX_PATH_LEVEL, stars: 0 };
   for (let i = 0; i < 30; i++) recordPath(top, true);
   assert.equal(top.level, MAX_PATH_LEVEL);
   assert.ok(passLevel(top).champion);
-  assert.equal(top.level, MAX_PATH_LEVEL);
+  assert.ok(!recordPath(top, true).quizNow, 'a champion just keeps practicing');
 });
 
-test('quizzes mix the level with one earlier problem', () => {
+test('the old 10-level path moves onto the 100 levels', () => {
+  const p = { level: 5, stars: 3, best: 5 };
+  assert.ok(migratePath(p));
+  assert.deepEqual([p.level, p.stars, p.v], [21, 0, 2]);
+  assert.ok(!migratePath(p), 'only once');
+});
+
+test('quizzes come from the last 5 levels, plus one from earlier', () => {
   const rng = mulberry32(11);
-  for (const lv of LEVELS) {
+  for (const lv of LEVELS.filter((l) => l.gate)) {
     const plan = quizPlan(lv.n, { rng });
     assert.equal(plan.length, QUIZ.size);
-    const fromLevel = plan.filter(([sk, d]) => lv.mix.some(([s2, d2]) => s2 === sk && d2 === d)).length;
-    assert.ok(fromLevel >= QUIZ.size - 1, `level ${lv.n} quiz is mostly its own level`);
+    const recent = LEVELS.slice(Math.max(0, lv.n - 5), lv.n).flatMap((l) => l.mix);
+    const fromRecent = plan.filter(([sk, d]) => recent.some(([s2, d2]) => s2 === sk && d2 === d)).length;
+    assert.ok(fromRecent >= QUIZ.size - 1, `level ${lv.n} quiz is mostly its own levels`);
   }
-  assert.ok(quizPlan(7, { rng, multOn: false }).every(([sk]) => sk !== 'M'));
+  assert.ok(quizPlan(65, { rng, multOn: false }).every(([sk]) => sk !== 'M'));
 });
 
 test('quiz mistakes are named for the grown-ups', () => {

@@ -1,6 +1,6 @@
 // Saved data lives only in this browser (localStorage). Every access is
 // wrapped so the app still works when storage is blocked.
-import { NEXT_SKILL, BASE_SKILL, MAX_LEVEL } from './math.js?v=21';
+import { NEXT_SKILL, BASE_SKILL, MAX_LEVEL } from './math.js?v=22';
 
 // Each player (Mila, and classmates who play on this device) has their own saved data.
 // Nothing leaves the device: no accounts, no server.
@@ -9,6 +9,7 @@ const PLAYERS_KEY = 'rainbow-math-players-v1';
 const playerKey = (id) => `rainbow-math-player-${id}`;
 let currentId = null;
 
+const lstat = () => ({ tries: 0, first: 0 });
 const fadeStat = () => ({ run: 0, miss: 0, passed: false });
 const skillStat = () => ({ level: 1, streak: 0, struggle: 0, attempts: 0, independent: 0, helped: 0 });
 
@@ -32,7 +33,10 @@ export function defaults() {
     progress: {
       skills: { A: skillStat(), B: skillStat(), C: skillStat(), D: skillStat(), M: skillStat() },
       unlocked: { C: false, D: false },
-      path: { level: 1, stars: 0, best: 1, quizDue: false, quizWait: 0, champion: false }, // the level path
+      path: { level: 1, stars: 0, best: 1, quizDue: false, quizWait: 0, champion: false }, // the level path (100 levels; v: 2 once moved from the old 10)
+      // little kids (4–5): their own 30-level path and how each picture skill is going
+      lpath: { level: 1, stars: 0, best: 1, quizDue: false, quizWait: 0, champion: false },
+      lstats: { count: lstat(), find: lstat(), more: lstat(), add: lstat(), sub: lstat(), after: lstat(), before: lstat() },
       placed: false, // finished the first "what do you know" check
       // how much the guide helps, per skill: it steps back as she shows she knows it
       fade: { A: fadeStat(), B: fadeStat(), C: fadeStat(), D: fadeStat(), M: fadeStat() },
@@ -87,12 +91,13 @@ export function loadPlayers() {
 }
 export const savePlayers = (list) => writeJSON(PLAYERS_KEY, list);
 
-export function addPlayer(list, { name, friend, lang }) {
+export function addPlayer(list, { name, friend, lang, little = false }) {
   const id = `p${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`;
-  list.players.push({ id, name, friend, pin: null, created: new Date().toISOString() });
+  list.players.push({ id, name, friend, pin: null, little: !!little, created: new Date().toISOString() });
   savePlayers(list);
   const d = defaults();
   if (lang) d.settings.lang = lang;
+  if (little) d.progress.placed = true; // little kids start at level 1, no check
   writeJSON(playerKey(id), d);
   return id;
 }

@@ -37,3 +37,14 @@ test('regrouping setting is respected', () => {
   assert.deepEqual([...seen].sort(), ['A', 'B', 'C', 'D']);
   for (let i = 0; i < 100; i++) assert.ok(['B', 'D'].includes(pickSkill(d, 'sub', {})));
 });
+
+import { migratePath } from '../js/levels.js';
+test('an old 10-level path is moved onto the 100 levels when she logs in', () => {
+  const d = defaults();
+  d.progress.path = { level: 5, stars: 3, best: 5 }; // saved before the 100 levels
+  assert.ok(migratePath(d.progress.path));
+  assert.equal(d.progress.path.level, 21);
+  const fresh = defaults();
+  assert.ok(migratePath(fresh.progress.path), 'a new player is moved once too');
+  assert.equal(fresh.progress.path.level, 1);
+});
