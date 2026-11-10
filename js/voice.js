@@ -2,22 +2,28 @@
 // tools/eleven.mjs). Each line is one whole recording, so it sounds natural.
 // The app never calls ElevenLabs. If a recording is missing it says false and
 // the app uses the device voice instead.
-import { audioCtx, audioCtxAny, stopSpeaking } from './audio.js?v=23';
-import { clipId, variants, explainId } from './voicelines.js?v=23';
+import { audioCtx, audioCtxAny, stopSpeaking } from './audio.js?v=24';
+import { clipId, variants, explainId } from './voicelines.js?v=24';
 
 // iPad/iPhone play the recordings with a regular audio player (the kind videos use):
 // it is not silenced by the mute switch the way Web Audio can be.
 const IOS = typeof navigator !== 'undefined'
   && (/iPad|iPhone|iPod/.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
 let media = null;
+function newPlayer() {
+  const a = new Audio();
+  a.preload = 'auto';
+  a.setAttribute('playsinline', '');
+  return a;
+}
 function mediaEl() {
-  if (!media && typeof Audio !== 'undefined') {
-    media = new Audio();
-    media.preload = 'auto';
-    media.setAttribute('playsinline', '');
-  }
+  if (!media && typeof Audio !== 'undefined') media = newPlayer();
   return media;
 }
+// Spare players for lines said in pieces: the next piece is already loaded in one
+// of them while the current piece plays, so the words run together without a gap.
+const SPARES = 3;
+const spares = [];
 // Call inside a tap once: after that Safari lets this player start sounds by itself.
 export function unlockMedia() {
   if (!IOS) return;
@@ -26,9 +32,18 @@ export function unlockMedia() {
   a.__unlocked = true;
   // must be an unmuted play inside the tap, or Safari won't count it (the clip itself is silent)
   a.muted = false;
-  a.src = new URL('../audio/silence.mp3', import.meta.url).href;
+  const quiet = new URL('../audio/silence.mp3', import.meta.url).href;
+  a.src = quiet;
   const p = a.play();
   if (p && p.then) p.then(() => { voiceInfo.unlocked = true; }).catch((e) => { a.__unlocked = false; voiceInfo.unlockError = e && e.name; });
+  // each spare has to be started inside a tap too, or Safari won't let it play later
+  while (spares.length < SPARES) {
+    const b = newPlayer();
+    spares.push(b);
+    b.src = quiet;
+    const q = b.play();
+    if (q && q.then) q.then(() => { b.__unlocked = true; }).catch(() => {});
+  }
 }
 
 let manifest = null;
@@ -48,7 +63,7 @@ let token = 0;
 // Everyone waits for the same download (two lines asked at once both get the list).
 function loadManifest() {
   if (!manifestLoading) {
-    manifestLoading = fetch(new URL('../audio/manifest.json?v=23', import.meta.url))
+    manifestLoading = fetch(new URL('../audio/manifest.json?v=24', import.meta.url))
       .then((r) => (r.ok ? r.json() : null))
       .then((m) => { manifest = m; return m; })
       .catch(() => null); // no recordings: device voice is used
@@ -84,7 +99,7 @@ function pickTake(m, lang, key, v) {
 
 export function stopClips() {
   token++;
-  if (media && !media.paused) { try { media.pause(); } catch (e) { /* ignore */ } }
+  for (const a of [media, ...spares]) if (a && !a.paused) { try { a.pause(); } catch (e) { /* ignore */ } }
   if (current) { try { current.stop(); } catch (e) { /* already stopped */ } current = null; }
 }
 
@@ -149,6 +164,15 @@ async function playFiles(m, files, label) {
   stopSpeaking();
   if (current) { try { current.stop(); } catch (e) { /* ignore */ } current = null; }
   if (IOS && media && media.__unlocked) {
+    const players = [media, ...spares.filter((b) => b.__unlocked)];
+    for (const a of players) if (!a.paused) { try { a.pause(); } catch (e) { /* ignore */ } }
+    if (files.length > 1 && players.length > 1) {
+      try {
+        await playGapless(players, files.map(url), my);
+        voiceInfo.last = { how: 'recording', via: `iPad players x${players.length} (${label})`, key: label };
+        return true;
+      } catch (e) { voiceInfo.mediaError = e && e.name; /* one player at a time below */ }
+    }
     try {
       media.src = url(files[0]);
       await media.play();
@@ -188,6 +212,33 @@ async function playFiles(m, files, label) {
   return true;
 }
 let seqSources = [];
+
+// Piece i plays in player i % k. Pieces are loaded ahead; when a piece ends the next
+// one starts at once, and the player that just finished loads the piece k ahead.
+async function playGapless(players, urls, my) {
+  const k = players.length;
+  for (let i = 0; i < Math.min(k, urls.length); i++) {
+    players[i].onended = null;
+    players[i].src = urls[i];
+    try { players[i].load(); } catch (e) { /* ignore */ }
+  }
+  urls.forEach((u, i) => {
+    if (i >= k) return;
+    // the handler for player p follows whichever piece it is playing now
+    let at = i;
+    players[i].onended = () => {
+      if (my !== token) return;
+      const done = at;
+      if (done + 1 < urls.length) players[(done + 1) % k].play().catch(() => {});
+      if (done + k < urls.length) {
+        at = done + k;
+        players[done % k].src = urls[at];
+        try { players[done % k].load(); } catch (e) { /* ignore */ }
+      }
+    };
+  });
+  await players[0].play();
+}
 
 async function playFile(m, file, key) {
   const my = ++token;

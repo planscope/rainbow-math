@@ -5,17 +5,20 @@
 //   node tools/eleven.mjs voices                 list voices (yours + cartoon/child ones in the library)
 //   node tools/eleven.mjs add <public_owner_id> <voice_id> <name>   add a library voice to your account
 //   node tools/eleven.mjs sample <voice_id> <name>   record two short test lines (EN + ES) to samples/
-//   node tools/eleven.mjs generate <voice_id> [name] record every missing clip to audio/ + manifest
+//   node tools/eleven.mjs generate house           record every missing clip with the house voices (usual way)
+//   node tools/eleven.mjs generate <voice_id> [name] record every missing clip with one voice
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { allLines } from '../js/voicelines.js';
+import { HOUSE } from './voice-house.mjs';
+import { tidyFile } from './tidy-audio.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const AUDIO = path.join(ROOT, 'audio');
 const API = 'https://api.elevenlabs.io';
-const MODEL = 'eleven_v3'; // the most expressive model: understands [excited], [giggles], [whispers]
+const MODEL = HOUSE.model; // the house voice: see tools/voice-house.mjs
 
 function key() {
   const f = path.join(os.homedir(), '.config', 'elevenlabs', 'api_key');
@@ -40,11 +43,10 @@ async function api(method, url, body, binary = false) {
   throw new Error('ElevenLabs is busy, try again later');
 }
 
-// A bright, playful, friendly read.
-const SETTINGS = { stability: 0.5 };
+const SETTINGS = HOUSE.settings;
 
 async function tts(voiceId, text, lang) {
-  return api('POST', `/v1/text-to-speech/${voiceId}?output_format=mp3_44100_64`, {
+  return api('POST', `/v1/text-to-speech/${voiceId}?output_format=${HOUSE.format}`, {
     text, model_id: MODEL, language_code: lang, voice_settings: SETTINGS,
   }, true);
 }
@@ -95,6 +97,8 @@ async function generate(voiceId, name = '') {
   const all = allLines();
   const ids = Object.keys(all);
   const onlyLang = process.env.LANG_ONLY || null;
+  // voiceId 'house' records each language with its house voice (tools/voice-house.mjs)
+  const voiceFor = (lang) => (voiceId === 'house' ? HOUSE.voices[lang].id : voiceId);
   const todo = ids.filter((id) => !fs.existsSync(path.join(AUDIO, `${id}.mp3`)) && (!onlyLang || all[id].lang === onlyLang));
   const chars = todo.reduce((n, id) => n + all[id].text.length, 0);
   console.log(`${ids.length} clips, ${todo.length} to record (${chars} characters)`);
@@ -104,8 +108,9 @@ async function generate(voiceId, name = '') {
     while (work.length) {
       const id = work.shift();
       const { lang, text } = all[id];
-      const buf = await tts(voiceId, text, lang);
+      const buf = await tts(voiceFor(lang), text, lang);
       fs.writeFileSync(path.join(AUDIO, `${id}.mp3`), buf);
+      await tidyFile(path.join(AUDIO, `${id}.mp3`), id, true); // no dead air at the end
       done++;
       if (done % 25 === 0 || done === todo.length) console.log(`  ${done}/${todo.length}`);
     }
@@ -136,6 +141,7 @@ async function relang(lang, voiceId, name) {
     while (work.length) {
       const id = work.shift();
       fs.writeFileSync(path.join(AUDIO, `${id}.mp3`), await tts(voiceId, all[id].text, lang));
+      await tidyFile(path.join(AUDIO, `${id}.mp3`), id, true);
       done++;
       if (done % 20 === 0 || done === ids.length) console.log(`  ${done}/${ids.length}`);
     }
