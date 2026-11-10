@@ -1,9 +1,10 @@
-// Saved data lives only in this browser (localStorage). Every access is
-// wrapped so the app still works when storage is blocked.
-import { NEXT_SKILL, BASE_SKILL, MAX_LEVEL } from './math.js?v=24';
+// Saved data lives in this browser (localStorage) first, so the app works with no
+// internet; js/sync.js also keeps a copy in the family's cloud so it follows each
+// student to other devices. Every access is wrapped so the app still works when
+// storage is blocked.
+import { NEXT_SKILL, BASE_SKILL, MAX_LEVEL } from './math.js?v=25';
 
 // Each player (Mila, and classmates who play on this device) has their own saved data.
-// Nothing leaves the device: no accounts, no server.
 const OLD_KEY = 'mila-rainbow-math-v1';          // before players existed (Mila only)
 const PLAYERS_KEY = 'rainbow-math-players-v1';
 const playerKey = (id) => `rainbow-math-player-${id}`;
@@ -140,10 +141,21 @@ export function load(id) {
   return d;
 }
 
+// Called after every save so the cloud copy can catch up (set by the app).
+let afterSave = null;
+export const onSaved = (fn) => { afterSave = fn; };
+
 export function save(data) {
   if (!currentId) return;
+  data.savedAt = new Date().toISOString();
   writeJSON(playerKey(currentId), data);
+  if (afterSave) afterSave(currentId);
 }
+
+// Raw saved data for the cloud copy (no defaults mixed in).
+export const readData = (id) => readJSON(playerKey(id));
+export const writeData = (id, d) => writeJSON(playerKey(id), d);
+export function dropData(id) { try { window.localStorage.removeItem(playerKey(id)); } catch (e) { /* ignore */ } }
 
 // ---------------------------------------------------------------- adaptivity
 export function regroupAvailable(data, skill) {

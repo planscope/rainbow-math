@@ -1,15 +1,16 @@
 // Mila's Rainbow Math Adventure: screens and interaction.
-import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL, mistakePattern } from './math.js?v=24';
-import * as M from './model.js?v=24';
-import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=24';
-import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL, QUIZ, passLevel, failQuiz, quizPlan, worldOf, WORLD_COUNT, migratePath } from './levels.js?v=24';
-import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=24';
-import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=24';
-import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults, loadPlayers, savePlayers, addPlayer, removePlayer, pinHash, helpLevel, recordFade, passedFade } from './store.js?v=24';
-import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking as stopDeviceSpeech, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=24';
-import { playLine, playExplain, playSequence, playParts, stopClips, preloadLines, unlockMedia, voiceInfo, voiceNames } from './voice.js?v=24';
-import { lineText, explainFor, readSequence, clipId } from './voicelines.js?v=24';
-import { LITTLE_LEVELS, LITTLE_WORLDS, LITTLE_SKILLS, littleWorldOf, makeLittle, pickLittle, OBJ_EMOJI, migrateLittle } from './little.js?v=24';
+import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL, mistakePattern } from './math.js?v=25';
+import * as M from './model.js?v=25';
+import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=25';
+import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL, QUIZ, passLevel, failQuiz, quizPlan, worldOf, WORLD_COUNT, migratePath } from './levels.js?v=25';
+import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=25';
+import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=25';
+import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults, loadPlayers, savePlayers, addPlayer, removePlayer, pinHash, helpLevel, recordFade, passedFade, onSaved, readData, writeData, dropData } from './store.js?v=25';
+import { createSync, showCode, readCode } from './sync.js?v=25';
+import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking as stopDeviceSpeech, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=25';
+import { playLine, playExplain, playSequence, playParts, stopClips, preloadLines, unlockMedia, voiceInfo, voiceNames } from './voice.js?v=25';
+import { lineText, explainFor, readSequence, clipId } from './voicelines.js?v=25';
+import { LITTLE_LEVELS, LITTLE_WORLDS, LITTLE_SKILLS, littleWorldOf, makeLittle, pickLittle, OBJ_EMOJI, migrateLittle } from './little.js?v=25';
 const stopSpeaking = () => { stopDeviceSpeech(); stopClips(); };
 
 // ---------------------------------------------------------------- setup
@@ -31,6 +32,30 @@ let players = loadPlayers();
 let player = null;
 let data = guestData();
 setSound(data.settings.sound);
+
+// Each student's progress also lives in the cloud, so she can play on any device.
+const sync = createSync({
+  getPlayers: () => players, savePlayers, readData, writeData, dropData,
+  onRemote: (id) => takeRemote(id),
+});
+onSaved((id) => sync.saved(id));
+// Screens where new progress from another device can appear without surprising her.
+const CALM = ['who', 'welcome', 'island', 'path', 'parent', 'newplayer', 'join'];
+// Another device's progress arrived for someone: if it's who's playing, use it now
+// (her half-done problem on this device stays as it is).
+function takeRemote(id) {
+  if (player && player.id === id) {
+    const fresh = load(id);
+    const keep = data.active;
+    for (const k of Object.keys(fresh)) if (k !== 'active') data[k] = fresh[k];
+    data.active = keep;
+    player = players.players.find((x) => x.id === id) || player;
+  }
+  if (CALM.includes(screen)) update();
+}
+async function pullNow(id) {
+  try { if (await sync.pull(id)) takeRemote(id); } catch (e) { /* offline: try again later */ }
+}
 
 function guestData() {
   // before anyone logs in: English first (Spanish is the second language)
@@ -143,6 +168,7 @@ function render() {
     case 'who': view = viewWho(); break;
     case 'pin': view = viewPin(); break;
     case 'newplayer': view = viewNewPlayer(); break;
+    case 'join': view = viewJoin(); break;
     case 'placeIntro': view = viewPlaceIntro(); break;
     case 'placeDone': view = viewPlaceDone(); break;
     case 'prize': view = viewPrize(); break;
@@ -599,7 +625,15 @@ async function pinPress(d) {
   update();
 }
 
-function login(pl) {
+async function login(pl) {
+  // first bring in what she did on other devices (a short wait at most; the rest arrives later)
+  const cloud = players.players.find((x) => x.id === pl.id);
+  if (sync.on() && cloud && cloud.cloud) {
+    pin.msg = T('syncing');
+    update();
+    await Promise.race([pullNow(pl.id), new Promise((r) => setTimeout(r, 2500))]);
+    pin.msg = '';
+  }
   player = players.players.find((x) => x.id === pl.id) || pl;
   data = load(player.id);
   migratePath(data.progress.path);
@@ -653,7 +687,41 @@ function viewNewPlayer() {
       type: 'button', class: 'rm-friend-opt', 'aria-pressed': String(draft.friend === f), 'aria-label': CREATURE_NAMES[f][L()], 'data-k': `fr-${f}`,
       onclick: () => { draft.friend = f; sfx.tap(); update(); },
     }, h('span', { html: friendSVG(f) })))),
-    h('div', { class: 'rm-actions' }, button(T('newNext'), createPlayer, { cls: 'primary big', ic: 'next', k: 'new-next', disabled: !ok })));
+    h('div', { class: 'rm-actions' }, button(T('newNext'), createPlayer, { cls: 'primary big', ic: 'next', k: 'new-next', disabled: !ok })),
+    sync.on() ? h('div', { class: 'rm-join-link' }, button(T('joinLink'), () => { joinDraft = { code: '', msg: '', busy: false }; go('join'); }, { cls: 'soft', ic: 'next', k: 'join-open' })) : null);
+}
+
+// ---------------------------------------------------------------- the same student on another device
+let joinDraft = { code: '', msg: '', busy: false };
+function viewJoin() {
+  const input = h('input', {
+    type: 'text', class: 'rm-input rm-code-input', maxlength: '9', autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false',
+    placeholder: 'K7M2-Q9XF', value: joinDraft.code, 'aria-label': T('joinTitle'), 'data-k': 'join-input',
+    oninput: (e) => { joinDraft.code = e.target.value.toUpperCase().slice(0, 9); joinDraft.msg = ''; const m = root.querySelector('.rm-pin-msg'); if (m) m.textContent = '\u00a0'; },
+    onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); joinNow(); } },
+  });
+  return h('main', { class: 'rm-screen rm-newplayer rm-join' },
+    h('div', { class: 'rm-row-top' }, button(T('back'), () => go('newplayer'), { cls: 'soft small', ic: 'back', k: 'back' }), langButton()),
+    h('h2', { class: 'rm-h2' }, T('joinTitle')),
+    h('p', { class: 'rm-text' }, T('joinText')),
+    input,
+    h('p', { class: 'rm-pin-msg', role: 'status' }, joinDraft.busy ? T('joinWait') : joinDraft.msg || '\u00a0'),
+    h('div', { class: 'rm-actions' }, button(T('joinGo'), joinNow, { cls: 'primary big', ic: 'next', k: 'join-go', disabled: joinDraft.busy })));
+}
+async function joinNow() {
+  if (joinDraft.busy) return;
+  const code = readCode(joinDraft.code);
+  if (!code) { joinDraft.msg = T('joinBad'); sfx.soft(); update(); return; }
+  joinDraft.busy = true;
+  update();
+  let r;
+  try { r = await sync.join(code); } catch (e) { r = { ok: false, offline: true }; }
+  joinDraft.busy = false;
+  if (!r.ok) { joinDraft.msg = r.offline ? T('joinOffline') : T('joinNone'); sfx.soft(); update(); return; }
+  const pl = players.players.find((x) => x.id === r.id);
+  sfx.reward();
+  if (r.combined) toast(T('joinCombined', { who: pl.name }));
+  pickPlayer(pl);
 }
 
 function createPlayer() {
@@ -661,6 +729,7 @@ function createPlayer() {
   if (!name) return;
   const id = addPlayer(players, { name, friend: draft.friend, lang: L(), little: !!draft.little });
   players = loadPlayers();
+  sync.push(id);
   pickPlayer(players.players.find((x) => x.id === id));
 }
 
@@ -2556,6 +2625,7 @@ function viewParentLittle() {
       h('h2', { class: 'rm-h2' }, `${T('p_title')} · ${player.name}`),
       button(T('p_close'), () => go(parentReturn === 'parent' ? 'welcome' : parentReturn), { cls: 'soft small', ic: 'close', k: 'p-close' })),
     parentMsg ? h('p', { class: 'rm-small ok', role: 'status' }, parentMsg) : null,
+    cloudCard(),
     h('section', { class: 'rm-card rm-p-sec' },
       h('h3', { class: 'rm-h3' }, T('p_lskills')),
       h('p', { class: 'rm-small' }, T('p_littleNote')),
@@ -2577,7 +2647,7 @@ function viewParentLittle() {
       seg(T('p_motion'), st.motion, [['auto', T('p_motionAuto')], ['reduce', T('p_motionReduce')]], (v) => { st.motion = v; }),
       voiceCheck()),
     h('section', { class: 'rm-card rm-p-sec' },
-      h('p', { class: 'rm-small' }, T('p_saveNote')),
+      h('p', { class: 'rm-small' }, T(sync.on() ? 'p_saveNoteCloud' : 'p_saveNote')),
       button(T('p_changePin'), changeParentPin, { cls: 'small soft', ic: 'lock', k: 'p-change-pin' }),
       parentConfirm
         ? h('div', { class: 'rm-confirm', role: 'alertdialog', 'aria-label': T('p_reset') },
@@ -3256,6 +3326,16 @@ function levelPicker(label, value, max, onPick, nameOf = lvName) {
     }, Array.from({ length: max }, (_, i) => h('option', { value: String(i + 1), selected: i + 1 === value }, `${i + 1} \u00b7 ${nameOf(i + 1)}`))));
 }
 
+// This child's code for other devices, at the top of their grown-ups page.
+function cloudCard() {
+  if (!sync.on() || !player) return null;
+  const pl = players.players.find((x) => x.id === player.id) || player;
+  return h('section', { class: 'rm-card rm-p-sec rm-cloud-card' },
+    h('p', null, h('span', { class: 'rm-small' }, `\u2601\uFE0F ${T('p_code')}: `),
+      pl.cloud && pl.rev ? h('b', { class: 'rm-code', 'data-k': 'my-code' }, showCode(pl.cloud)) : h('span', { class: 'rm-small' }, T('p_codeWait'))),
+    h('p', { class: 'rm-small' }, T('p_cloudNote')));
+}
+
 function playersSection() {
   return h('section', { class: 'rm-card rm-p-sec' },
     h('h3', { class: 'rm-h3' }, T('p_players')),
@@ -3263,12 +3343,18 @@ function playersSection() {
       h('span', { class: 'rm-plist-art', html: friendSVG(pl.friend || 'fox') }),
       h('b', null, pl.name),
       h('span', { class: 'rm-small' }, pl.little ? T('kindLittle') : T('kindBig')),
+      sync.on() ? h('span', { class: 'rm-cloud-code', 'data-k': `code-${pl.id}` }, pl.cloud && pl.rev
+        ? [h('span', { class: 'rm-small' }, `${T('p_code')}: `), h('b', { class: 'rm-code' }, showCode(pl.cloud))]
+        : h('span', { class: 'rm-small' }, T('p_codeWait'))) : null,
       button(T('p_resetPin'), () => { pl.pin = null; savePlayers(players); parentMsg = T('p_pinReset'); update(); }, { cls: 'small soft', k: `pin-reset-${pl.id}`, disabled: !pl.pin }),
       pdel === pl.id
-        ? h('span', { class: 'rm-confirm-inline' }, h('span', null, T('p_delSure', { who: pl.name })),
+        ? h('span', { class: 'rm-confirm-inline' }, h('span', null, sync.on() && pl.cloud && pl.rev ? T('p_delCloud', { who: pl.name }) : T('p_delSure', { who: pl.name })),
           button(T('p_resetYes'), () => { removePlayer(players, pl.id); players = loadPlayers(); pdel = null; if (player && player.id === pl.id) { player = null; data = guestData(); play = null; } update(); }, { cls: 'small danger', k: `del-yes-${pl.id}` }),
           button(T('p_resetNo'), () => { pdel = null; update(); }, { cls: 'small soft', k: `del-no-${pl.id}` }))
         : button(T('p_delPlayer'), () => { pdel = pl.id; update(); }, { cls: 'small soft', k: `del-${pl.id}` })))),
+    sync.on() ? h('p', { class: 'rm-small' }, T('p_cloudNote')) : null,
+    sync.on() ? h('p', { class: `rm-small ${players.players.some((x) => x.dirty) && sync.state.online === false ? 'warn' : ''}` },
+      players.players.some((x) => x.dirty || !x.rev) ? T('p_cloudWaiting') : T('p_cloudOk')) : null,
     h('p', { class: 'rm-small' }, T('p_playersNote')));
 }
 let pdel = null;
@@ -3328,6 +3414,7 @@ function viewParent() {
       h('h2', { class: 'rm-h2' }, `${T('p_title')} \u00b7 ${player.name}`),
       button(T('p_close'), () => go(parentReturn === 'parent' ? 'welcome' : parentReturn), { cls: 'soft small', ic: 'close', k: 'p-close' })),
     parentMsg ? h('p', { class: 'rm-small ok', role: 'status' }, parentMsg) : null,
+    cloudCard(),
     learningSection(),
     prizesSection(),
     h('section', { class: 'rm-card rm-p-sec' },
@@ -3374,7 +3461,7 @@ function viewParent() {
           T('p_sessionRow', { date: fmtDate(x.date), mode: T(`p_mode_${x.mode}`), done: x.done, own: x.own, team: x.team }))))
         : h('p', { class: 'rm-small' }, T('p_noSessions'))),
     h('section', { class: 'rm-card rm-p-sec' },
-      h('p', { class: 'rm-small' }, T('p_saveNote')),
+      h('p', { class: 'rm-small' }, T(sync.on() ? 'p_saveNoteCloud' : 'p_saveNote')),
       !storageOK ? h('p', { class: 'rm-small warn' }, T('p_noStorage')) : null,
       h('p', { class: 'rm-small' }, T('p_speechNote'), canSpeak() ? '' : ' ✖'),
       h('p', { class: 'rm-small' }, T('p_unlistedNote')),
@@ -3477,7 +3564,7 @@ function voiceCheck() {
     h('div', { class: 'rm-field-l' }, T('vc_title')),
     h('p', { class: 'rm-small' }, T('vc_voice', { lang: lang === 'es' ? 'Español' : 'English', who: (voiceNamesCache && voiceNamesCache[lang]) || '\u2026' })),
     h('p', { class: 'rm-small' }, `${T('vc_last')}: ${last}`),
-    h('p', { class: 'rm-small' }, `iPad: ${vi.ios ? T('p_on') : T('p_off')} \u00b7 ${T('p_sound')}: ${data.settings.sound ? T('p_on') : T('p_off')} \u00b7 v24${vi.unlockError ? ` \u00b7 unlock: ${vi.unlockError}` : ''}${vi.mediaError ? ` \u00b7 player: ${vi.mediaError}` : ''}`),
+    h('p', { class: 'rm-small' }, `iPad: ${vi.ios ? T('p_on') : T('p_off')} \u00b7 ${T('p_sound')}: ${data.settings.sound ? T('p_on') : T('p_off')} \u00b7 v25${vi.unlockError ? ` \u00b7 unlock: ${vi.unlockError}` : ''}${vi.mediaError ? ` \u00b7 player: ${vi.mediaError}` : ''}`),
     button(T('vc_test'), () => { unlockMedia(); unlockAudio(); sayLine('hello'); setTimeout(() => { if (screen === 'parent') update(); }, 1200); }, { cls: 'small', ic: 'read', k: 'vc-test' }));
 }
 
@@ -3516,3 +3603,15 @@ if (reduceMQ && reduceMQ.addEventListener) reduceMQ.addEventListener('change', a
 const wakeSound = () => { unlockAudio(); unlockMedia(); };
 ['touchend', 'click', 'keydown'].forEach((ev) => document.addEventListener(ev, wakeSound, { capture: true, passive: true }));
 render();
+// Cloud: send anything waiting, and bring in what other devices saved.
+function catchUp() {
+  if (!sync.on()) return;
+  sync.upAll();
+  for (const pl of players.players) if (pl.cloud && (!player || pl.id !== player.id || CALM.includes(screen))) pullNow(pl.id);
+}
+catchUp();
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') catchUp();
+  else if (player) sync.push(player.id); // she put the iPad down: save to the cloud now
+});
+window.addEventListener('online', catchUp);

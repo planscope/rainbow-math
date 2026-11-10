@@ -1082,3 +1082,9 @@ button.rm-split-t.tap { min-width: 48px; height: 48px; cursor: pointer; box-shad
   .lu-bar-dot { width: 11px; height: 11px; }
   .lu-scene.skip .lu-card { width: 72px; height: 72px; font-size: 36px; }
 }
+
+/* v25: progress on every device */
+.rm .rm-join-link { margin-top: 18px; display: flex; justify-content: center; }
+.rm .rm-code-input { text-align: center; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 700; max-width: 360px; margin: 8px auto 0; display: block; }
+.rm .rm-cloud-code { display: inline-flex; align-items: baseline; gap: 4px; flex-wrap: wrap; }
+.rm .rm-code { font-family: ui-monospace, Menlo, monospace; letter-spacing: 0.08em; background: #fff3fb; color: var(--ink); padding: 2px 8px; border-radius: 8px; border: 2px dashed #ff8fd8; user-select: all; -webkit-user-select: all; }
