@@ -1048,3 +1048,37 @@ button.rm-split-t.tap { min-width: 48px; height: 48px; cursor: pointer; box-shad
 
 .rm .rm-next-card, .rm .rm-next-card b { color: var(--ink); }
 .rm[data-screen="lplay"] .rm-top .rm-btn.soft { background: #fff; }
+
+/* ---------------- v13: Luna's harder math: tens bars, ones dots, ten-frame */
+.lu-tensones { display: flex; align-items: flex-end; gap: 12px; justify-content: center; }
+.lu-bars { display: flex; gap: 6px; align-items: flex-end; }
+.lu-dots { display: flex; gap: 6px; align-items: flex-end; }
+.lu-dotcol { display: flex; flex-direction: column-reverse; gap: 5px; }
+.rm .lu-bar {
+  position: relative; width: 30px; padding: 4px 0; border-radius: 10px; background: #8b5cff; border: 2px solid #6a3df0;
+  display: flex; flex-direction: column; align-items: center; gap: 3px; box-shadow: none; min-width: 0; min-height: 0;
+}
+.lu-bar-dot { width: 14px; height: 14px; border-radius: 999px; background: #fff; opacity: .9; }
+.rm .lu-dot { position: relative; width: 30px; height: 30px; border-radius: 999px; background: #ff9f1c; border: 2px solid #e07b00; padding: 0; min-width: 0; min-height: 0; box-shadow: none; }
+.rm .lu-bar.counted, .rm .lu-dot.counted { box-shadow: 0 0 0 4px rgba(255, 216, 77, .8); }
+.rm .lu-bar.gone, .rm .lu-dot.gone { opacity: .25; filter: grayscale(.7); }
+.rm .lu-bar.gone::after, .rm .lu-dot.gone::after {
+  content: ''; position: absolute; left: -6px; right: -6px; top: 50%; height: 4px; background: #e8590c; transform: rotate(-35deg); border-radius: 4px;
+}
+.lu-bar .lu-n, .lu-dot .lu-n { top: -14px; right: -14px; font-size: 16px; min-width: 28px; height: 28px; }
+.lu-scene.help .lu-bar:not(.counted):not(.gone), .lu-scene.help .lu-dot:not(.counted):not(.gone) { animation: lu-glow 1.2s ease-in-out infinite; }
+.lu-scene.bars .lu-group, .lu-scene.compare .lu-group { padding: 14px 12px 10px; }
+.lu-frame { display: grid; grid-template-columns: repeat(5, 70px); grid-template-rows: repeat(2, 70px); gap: 6px; padding: 8px; border-radius: 18px; background: #1c7ed6; }
+.lu-cell { position: relative; border-radius: 12px; background: #fff; display: grid; place-items: center; }
+.rm .lu-cell.empty { border: 3px dashed #a5d8ff; padding: 0; min-width: 0; min-height: 0; box-shadow: none; }
+.rm .lu-cell.empty.counted { background: #fff3bf; border-color: #ffd84d; }
+.lu-cell .lu-em { font-size: 44px; }
+.lu-scene.help .lu-cell.empty:not(.counted) { animation: lu-glow 1.2s ease-in-out infinite; }
+.lu-scene.skip .lu-card { width: 104px; height: 104px; font-size: 52px; }
+.lu-scene.compare .lu-op { color: #8b5cff; }
+@media (max-width: 620px) {
+  .lu-frame { grid-template-columns: repeat(5, 52px); grid-template-rows: repeat(2, 52px); }
+  .rm .lu-bar { width: 24px; }
+  .lu-bar-dot { width: 11px; height: 11px; }
+  .lu-scene.skip .lu-card { width: 72px; height: 72px; font-size: 36px; }
+}

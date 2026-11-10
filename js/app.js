@@ -1,15 +1,15 @@
 // Mila's Rainbow Math Adventure: screens and interaction.
-import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL, mistakePattern } from './math.js?v=22';
-import * as M from './model.js?v=22';
-import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=22';
-import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL, QUIZ, passLevel, failQuiz, quizPlan, worldOf, WORLD_COUNT, migratePath } from './levels.js?v=22';
-import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=22';
-import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=22';
-import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults, loadPlayers, savePlayers, addPlayer, removePlayer, pinHash, helpLevel, recordFade, passedFade } from './store.js?v=22';
-import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking as stopDeviceSpeech, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=22';
-import { playLine, playExplain, playSequence, playParts, stopClips, preloadLines, unlockMedia, voiceInfo, voiceNames } from './voice.js?v=22';
-import { lineText, explainFor, readSequence } from './voicelines.js?v=22';
-import { LITTLE_LEVELS, LITTLE_WORLDS, littleWorldOf, makeLittle, pickLittle, OBJ_EMOJI } from './little.js?v=22';
+import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL, mistakePattern } from './math.js?v=23';
+import * as M from './model.js?v=23';
+import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=23';
+import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL, QUIZ, passLevel, failQuiz, quizPlan, worldOf, WORLD_COUNT, migratePath } from './levels.js?v=23';
+import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=23';
+import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=23';
+import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults, loadPlayers, savePlayers, addPlayer, removePlayer, pinHash, helpLevel, recordFade, passedFade } from './store.js?v=23';
+import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking as stopDeviceSpeech, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=23';
+import { playLine, playExplain, playSequence, playParts, stopClips, preloadLines, unlockMedia, voiceInfo, voiceNames } from './voice.js?v=23';
+import { lineText, explainFor, readSequence, clipId } from './voicelines.js?v=23';
+import { LITTLE_LEVELS, LITTLE_WORLDS, LITTLE_SKILLS, littleWorldOf, makeLittle, pickLittle, OBJ_EMOJI, migrateLittle } from './little.js?v=23';
 const stopSpeaking = () => { stopDeviceSpeech(); stopClips(); };
 
 // ---------------------------------------------------------------- setup
@@ -67,7 +67,7 @@ const WORLD_ICONS = ['\u{1F33C}', '\u{1F680}', '\u{1F98A}', '\u{1F308}', '\u{1F3
 const lvName = (n) => T(`world${worldOf(n)}`);
 // Luna (4–5) plays in her own little world: her own 30 levels, pictures, and everything said out loud.
 const isLittle = () => !!(player && player.little);
-const LITTLE_ICONS = ['\u{1F33B}', '\u{1F98B}', '\u{1F319}'];
+const LITTLE_ICONS = ['\u{1F33B}', '\u{1F51F}', '\u{1F91D}', '\u{1F98B}', '\u{1F4AF}', '\u{1F680}'];
 const PIC = ['\u{1F436}', '\u{1F431}', '\u{1F98B}', '\u2B50', '\u{1F353}', '\u{1F308}', '\u{1F41F}', '\u{1F338}', '\u{1F366}'];
 const lvNewLittle = (n) => { const lv = levelInfo(n, LITTLE_LEVELS); return lv.step === 1 ? T(`lworldNew${lv.world}`) : lv.gate ? T('lvGateNew') : T('lvStepNew'); };
 // Which path the shared screens show: the big-kid 100 levels, or the little-kid 30.
@@ -603,6 +603,7 @@ function login(pl) {
   player = players.players.find((x) => x.id === pl.id) || pl;
   data = load(player.id);
   migratePath(data.progress.path);
+  if (player.little) migrateLittle(data.progress.lpath);
   data.visits = (data.visits || 0) + 1;
   save(data);
   players.last = player.id;
@@ -2219,37 +2220,63 @@ function lNew() {
 
 function lInit() {
   const c = data.active.current;
-  lplay = { status: c.solved ? 'solved' : 'ask', tapped: [], help: false, wrong: c.picked ? c.picked.slice() : [], show: false, bump: false, starEarned: false, leaving: false };
+  lplay = { status: c.solved ? 'solved' : 'ask', marks: {}, total: 0, help: false, wrong: c.picked ? c.picked.slice() : [], show: false, bump: false, starEarned: false, leaving: false };
 }
 
 // Says the question in the recorded voice ("How many ducks? Count them, then tap the number!").
+// Says the question in the recorded voice. Adding and taking away are joined from recorded
+// pieces ("What is" + "thirty" + "plus" + "twenty"), skip counting says the numbers.
 function lSay() {
   const s = data.active;
   const p = s && s.current && s.current.p;
   if (!p) return;
   unlockMedia();
+  const lang = L();
+  const num = (x) => `${lang}-rd-n${x}`;
+  let ids = null;
+  if (p.op) ids = [`${lang}-rd-what`, num(p.a), `${lang}-rd-${p.op === '+' ? 'plus' : 'minus'}`, num(p.b)];
+  else if (p.skill === 'make10') ids = [`${lang}-rd-what`, num(10), `${lang}-rd-minus`, num(p.a)];
+  else if (p.skill === 'skip' || p.skill === 'skipTo') ids = [...p.seq.map(num), clipId(lang, 'lu_next')];
+  if (ids) {
+    if (!voiceOn()) return;
+    const text = p.op ? `${T('whatIs', { a: p.a, b: p.b, opw: opWord(p.op) })}` : p.skill === 'make10' ? T('l_q_make10') : `${p.seq.join(', ')}. ${T('l_q_skip')}`;
+    if (data.settings.coachVoiceKind === 'device') { speak(text, lang); return; }
+    playSequence(ids).then((ok) => {
+      if (ok) return;
+      if (p.seq) playSequence(p.seq.map(num)).then((ok2) => { if (!ok2) speak(text, lang); });
+      else speak(text, lang);
+    });
+    return;
+  }
   if (p.skill === 'count') sayLine(`lu_count_${p.obj}`);
   else if (p.skill === 'find') sayLine('lu_find', p.n);
   else if (p.skill === 'after') sayLine('lu_after', p.n);
   else if (p.skill === 'before') sayLine('lu_before', p.n);
+  else if (p.skill === 'tens') sayLine('lu_tens');
+  else if (p.skill === 'compare') sayLine('lu_bigger');
   else sayLine(`lu_${p.skill}`);
 }
 
 function lQuestion(p) {
+  if (p.op) return `${p.a} ${p.op === '+' ? '+' : '−'} ${p.b} = ?`;
   if (p.skill === 'count') return T('l_q_count', { obj: T(`obj_${p.obj}`) });
   if (p.skill === 'find') return T('l_q_find', { n: p.n });
   if (p.skill === 'after') return T('l_q_after', { n: p.n });
   if (p.skill === 'before') return T('l_q_before', { n: p.n });
+  if (p.skill === 'skip' || p.skill === 'skipTo') return T('l_q_skip');
   return T(`l_q_${p.skill}`);
 }
 
 // Tapping a picture counts it out loud: "one", "two", "three"...
-function lTapObj(i) {
-  if (!lplay || lplay.status !== 'ask' || lplay.tapped.includes(i)) return;
-  lplay.tapped.push(i);
+// Tapping a picture counts it out loud: "one, two, three". A tens bar counts 10 at once:
+// "ten, twenty, thirty", then the ones keep going: "thirty-one, thirty-two".
+function lTapObj(id, value = 1) {
+  if (!lplay || lplay.status !== 'ask' || lplay.marks[id] != null) return;
+  lplay.total += value;
+  lplay.marks[id] = lplay.total;
   sfx.pop();
   update();
-  if (voiceOn()) { unlockMedia(); playSequence([`${L()}-rd-n${lplay.tapped.length}`]); }
+  if (voiceOn() && lplay.total <= 100) { unlockMedia(); playSequence([`${L()}-rd-n${lplay.total}`]); }
 }
 
 function lAnswer(v) {
@@ -2264,7 +2291,7 @@ function lAnswer(v) {
   sfx.soft();
   save(data);
   if (c.wrongs >= 2) { lMiss(); return; }
-  if (s.mode !== 'lquiz') { lplay.help = true; lplay.tapped = []; sayLine('lu_help'); } else sayLine('quiz_check');
+  if (s.mode !== 'lquiz') { lplay.help = true; lplay.marks = {}; lplay.total = 0; sayLine('lu_help'); } else sayLine('quiz_check');
   update();
 }
 
@@ -2416,35 +2443,71 @@ function viewLittlePlay() {
 function littleScene(p, solved) {
   const em = OBJ_EMOJI[p.obj] || '⭐';
   const help = lplay.help && !solved ? 'help' : '';
-  const obj = (i, gone = false) => {
-    const k = lplay.tapped.indexOf(i);
-    return h('button', {
-      type: 'button', class: `lu-obj ${gone ? 'gone' : ''} ${k >= 0 ? 'counted' : ''}`, 'data-k': `l-obj-${i}`, 'aria-label': em,
-      disabled: gone || solved, style: `--d:${i * 40}ms`, onclick: () => lTapObj(i),
-    }, h('span', { class: 'lu-em' }, em), k >= 0 ? h('span', { class: 'lu-n' }, String(k + 1)) : null);
-  };
+  const badge = (id) => (lplay.marks[id] != null ? h('span', { class: 'lu-n' }, String(lplay.marks[id])) : null);
+  const obj = (id, gone = false, i = 0) => h('button', {
+    type: 'button', class: `lu-obj ${gone ? 'gone' : ''} ${lplay.marks[id] != null ? 'counted' : ''}`, 'data-k': `l-obj-${id}`, 'aria-label': em,
+    disabled: gone || solved, style: `--d:${i * 40}ms`, onclick: () => lTapObj(id),
+  }, h('span', { class: 'lu-em' }, em), badge(id));
   const rows = (items) => {
     const out = [];
     for (let i = 0; i < items.length; i += 5) out.push(h('div', { class: 'lu-row' }, items.slice(i, i + 5)));
     return h('div', { class: 'lu-rows' }, out);
   };
   const range = (n, from = 0) => Array.from({ length: n }, (_, i) => from + i);
-  if (p.skill === 'count') {
-    return h('div', { class: `lu-scene ${help}` }, rows(range(p.n).map((i) => obj(i))),
-      help ? h('p', { class: 'lu-tip' }, T('l_tapCount')) : null);
-  }
-  if (p.skill === 'add') {
+  // a number as tens bars and ones dots; `goneT` / `goneO` of them are taken away (crossed out)
+  const tensOnes = (g, n, goneT = 0, goneO = 0) => {
+    const t = Math.floor(n / 10), o = n % 10;
+    const bars = range(t).map((i) => {
+      const id = `${g}B${i}`, gone = i >= t - goneT;
+      return h('button', { type: 'button', class: `lu-bar ${gone ? 'gone' : ''} ${lplay.marks[id] != null ? 'counted' : ''}`, 'data-k': `l-obj-${id}`, 'aria-label': '10', disabled: gone || solved, onclick: () => lTapObj(id, 10) },
+        range(10).map(() => h('span', { class: 'lu-bar-dot' })), badge(id));
+    });
+    const dots = range(o).map((i) => {
+      const id = `${g}D${i}`, gone = i >= o - goneO;
+      return h('button', { type: 'button', class: `lu-dot ${gone ? 'gone' : ''} ${lplay.marks[id] != null ? 'counted' : ''}`, 'data-k': `l-obj-${id}`, 'aria-label': '1', disabled: gone || solved, onclick: () => lTapObj(id, 1) }, badge(id));
+    });
+    const dotCols = [];
+    for (let i = 0; i < dots.length; i += 5) dotCols.push(h('div', { class: 'lu-dotcol' }, dots.slice(i, i + 5)));
+    return h('div', { class: 'lu-tensones' }, h('div', { class: 'lu-bars' }, bars), dotCols.length ? h('div', { class: 'lu-dots' }, dotCols) : null);
+  };
+  const eq = () => h('p', { class: 'lu-eq' }, `${p.a} ${p.op === '+' ? '+' : '−'} ${p.b} = ${solved ? p.answer : '?'}`);
+
+  if (p.view === 'pics' && p.op === '+') {
     return h('div', { class: `lu-scene add ${help}` },
       h('div', { class: 'lu-groups' },
-        h('div', { class: 'lu-group a' }, rows(range(p.a).map((i) => obj(i)))),
+        h('div', { class: 'lu-group a' }, rows(range(p.a).map((i) => obj(i, false, i)))),
         h('span', { class: 'lu-op', 'aria-hidden': 'true' }, '+'),
-        h('div', { class: 'lu-group b' }, rows(range(p.b, p.a).map((i) => obj(i))))),
-      h('p', { class: 'lu-eq' }, `${p.a} + ${p.b} = ${solved ? p.answer : '?'}`));
+        h('div', { class: 'lu-group b' }, rows(range(p.b, p.a).map((i) => obj(i, false, i))))),
+      eq());
   }
-  if (p.skill === 'sub') {
-    return h('div', { class: `lu-scene sub ${help}` },
-      rows(range(p.a).map((i) => obj(i, i >= p.a - p.b))),
-      h('p', { class: 'lu-eq' }, `${p.a} − ${p.b} = ${solved ? p.answer : '?'}`));
+  if (p.view === 'pics' && p.op === '-') {
+    return h('div', { class: `lu-scene sub ${help}` }, rows(range(p.a).map((i) => obj(i, i >= p.a - p.b, i))), eq());
+  }
+  if (p.view === 'bars' && p.op === '+') {
+    return h('div', { class: `lu-scene bars ${help}` },
+      h('div', { class: 'lu-groups' },
+        h('div', { class: 'lu-group a' }, tensOnes('a', p.a)),
+        h('span', { class: 'lu-op', 'aria-hidden': 'true' }, '+'),
+        h('div', { class: 'lu-group b' }, tensOnes('b', p.b))),
+      eq());
+  }
+  if (p.view === 'bars' && p.op === '-') {
+    return h('div', { class: `lu-scene bars sub ${help}` }, tensOnes('a', p.a, Math.floor(p.b / 10), p.b % 10), eq());
+  }
+  if (p.view === 'bars') {
+    return h('div', { class: `lu-scene bars ${help}` }, tensOnes('a', p.answer), help ? h('p', { class: 'lu-tip' }, T('l_tapCount')) : null);
+  }
+  if (p.view === 'frame') {
+    // 7 are in the ten-frame; tap the empty spots to count how many more make 10
+    const cells = range(10).map((i) => (i < p.a
+      ? h('span', { class: 'lu-cell full' }, h('span', { class: 'lu-em' }, em))
+      : h('button', { type: 'button', class: `lu-cell empty ${lplay.marks[`e${i}`] != null ? 'counted' : ''}`, 'data-k': `l-obj-e${i}`, disabled: solved, onclick: () => lTapObj(`e${i}`) },
+        solved ? h('span', { class: 'lu-em' }, em) : null, badge(`e${i}`))));
+    return h('div', { class: `lu-scene frame ${help}` }, h('div', { class: 'lu-frame' }, cells), h('p', { class: 'lu-eq' }, `${p.a} + ${solved ? p.answer : '?'} = 10`));
+  }
+  if (p.skill === 'count') {
+    return h('div', { class: `lu-scene ${help}` }, rows(range(p.n).map((i) => obj(i, false, i))),
+      help ? h('p', { class: 'lu-tip' }, T('l_tapCount')) : null);
   }
   if (p.skill === 'more') {
     const side = (key, count) => h('button', {
@@ -2456,10 +2519,22 @@ function littleScene(p, solved) {
     solved ? h('b', { class: 'lu-side-n' }, String(count)) : null);
     return h('div', { class: 'lu-scene more' }, side('L', p.left), side('R', p.right));
   }
+  if (p.skill === 'skip' || p.skill === 'skipTo') {
+    return h('div', { class: 'lu-scene track skip' },
+      p.seq.map((v) => h('span', { class: 'lu-card' }, String(v))),
+      h('span', { class: `lu-card q ${solved ? 'got' : ''}` }, solved ? String(p.answer) : '?'));
+  }
   if (p.skill === 'after' || p.skill === 'before') {
     const known = h('span', { class: 'lu-card' }, String(p.n));
     const q = h('span', { class: `lu-card q ${solved ? 'got' : ''}` }, solved ? String(p.answer) : '?');
     return h('div', { class: 'lu-scene track' }, p.skill === 'after' ? [known, q] : [q, known]);
+  }
+  if (p.skill === 'compare') {
+    return h('div', { class: 'lu-scene compare' },
+      h('div', { class: 'lu-groups' },
+        h('div', { class: 'lu-group a' }, tensOnes('x', p.x)),
+        h('span', { class: 'lu-op', 'aria-hidden': 'true' }, '?'),
+        h('div', { class: 'lu-group b' }, tensOnes('y', p.y))));
   }
   // find: just listen, then tap the number
   return h('div', { class: 'lu-scene find' },
@@ -2471,7 +2546,7 @@ function viewParentLittle() {
   const ls = data.progress.lstats || {};
   const lp = data.progress.lpath;
   const quizzes = data.quizzes || [];
-  const rows = ['count', 'find', 'more', 'add', 'sub', 'after', 'before'].filter((k) => ls[k] && ls[k].tries > 0).map((k) => h('tr', null,
+  const rows = LITTLE_SKILLS.filter((k) => ls[k] && ls[k].tries > 0).map((k) => h('tr', null,
     h('th', { scope: 'row' }, T(`l_skill_${k}`)),
     h('td', null, String(ls[k].tries)),
     h('td', null, `${Math.round((ls[k].first / ls[k].tries) * 100)}%`)));
@@ -3402,7 +3477,7 @@ function voiceCheck() {
     h('div', { class: 'rm-field-l' }, T('vc_title')),
     h('p', { class: 'rm-small' }, T('vc_voice', { lang: lang === 'es' ? 'Español' : 'English', who: (voiceNamesCache && voiceNamesCache[lang]) || '\u2026' })),
     h('p', { class: 'rm-small' }, `${T('vc_last')}: ${last}`),
-    h('p', { class: 'rm-small' }, `iPad: ${vi.ios ? T('p_on') : T('p_off')} \u00b7 ${T('p_sound')}: ${data.settings.sound ? T('p_on') : T('p_off')} \u00b7 v22${vi.unlockError ? ` \u00b7 unlock: ${vi.unlockError}` : ''}${vi.mediaError ? ` \u00b7 player: ${vi.mediaError}` : ''}`),
+    h('p', { class: 'rm-small' }, `iPad: ${vi.ios ? T('p_on') : T('p_off')} \u00b7 ${T('p_sound')}: ${data.settings.sound ? T('p_on') : T('p_off')} \u00b7 v23${vi.unlockError ? ` \u00b7 unlock: ${vi.unlockError}` : ''}${vi.mediaError ? ` \u00b7 player: ${vi.mediaError}` : ''}`),
     button(T('vc_test'), () => { unlockMedia(); unlockAudio(); sayLine('hello'); setTimeout(() => { if (screen === 'parent') update(); }, 1200); }, { cls: 'small', ic: 'read', k: 'vc-test' }));
 }
 

@@ -142,6 +142,9 @@ export const LINES = {
   lu_help: { en: ["[gently] Let's count together! Tap each one.", '[gently] Let\'s count them slowly. Tap each one!'], es: '[gently] ¡Vamos a contar juntos! Toca cada uno.' },
   lu_show: { en: ["[gently] It's this one! You'll get the next one.", "[gently] Look, it's this one! Let's try another."], es: '[gently] ¡Es este! El siguiente te va a salir.' },
   lu_hello: { en: ["[excited] Hi there! Let's play with numbers!", '[happy] Yay, you came to play! Ready to count?'], es: '[excited] ¡Hola! ¡Vamos a jugar con los números!' },
+  lu_next: { en: ['[curious] What number comes next?', '[cheerful] Keep counting! What comes next?'], es: '[curious] ¿Qué número sigue?' },
+  lu_tens: { en: ['[cheerful] How many? Count the tens, then the ones!', '[curious] Tap the tens bars first: ten, twenty... then the ones!'], es: '[cheerful] ¿Cuántos hay? ¡Cuenta las decenas y luego las unidades!' },
+  lu_bigger: { en: ['[curious] Which number is bigger? Tap it!', '[cheerful] Look at the tens! Which number is bigger?'], es: '[curious] ¿Qué número es más grande? ¡Tócalo!' },
   lu_pic: { en: '[cheerful] Tap your three secret pictures!', es: '[cheerful] ¡Toca tus tres dibujos secretos!' },
   one_more_star: { en: ['[excited] Just one more star to the next level!', '[happy] One more star and you level up!'], es: '[excited] ¡Solo una estrella más para el siguiente nivel!' },
   prize_close: { en: ["[excited] Almost there! Just a few more rainbow pieces for your prize!", "[gasps] You're so close to your prize! Keep going!"], es: '[excited] ¡Ya casi! ¡Unas piezas más de arcoíris para tu premio!' },
@@ -200,8 +203,8 @@ export function allLines() {
 // her screen ("Nine plus two... how many is that?"). Each explanation is recorded whole,
 // once per number combination that can really happen (found from the step builder).
 // Only the numbers a line needs are used, so there are about 430 English recordings.
-import { buildSteps } from './math.js?v=22';
-import { buildMulSteps, allMulProblems } from './mult.js?v=22';
+import { buildSteps } from './math.js?v=23';
+import { buildMulSteps, allMulProblems } from './mult.js?v=23';
 
 export const EXPLAIN = {
   x_ones_sum: { from: 'w_ones_sum', params: ['x', 'y'], en: "[curious] Let's add the ones. {x} plus {y}... how many is that?" },
@@ -273,7 +276,7 @@ export function allExplanations(lang = 'en') {
 // ---------------------------------------------------------------- "Read to me" (English)
 // Problems and stories have different numbers every time, so "Read to me" joins short
 // recordings: the story pieces between the numbers, the numbers 0-100, and "What is ... plus ...?".
-import { STORIES } from './i18n.js?v=22';
+import { STORIES } from './i18n.js?v=23';
 
 const OPN = { '+': 'add', '-': 'sub', '×': 'mul' };
 const READ_WORDS = {
