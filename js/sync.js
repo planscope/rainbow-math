@@ -7,7 +7,7 @@
 // The device still saves first, so the app works the same with no internet; it
 // catches up later. When two devices both played, the progress is put together
 // (js/merge.js) instead of one copy winning.
-import { mergeData } from './merge.js?v=25';
+import { mergeData } from './merge.js?v=26';
 
 export const SYNC_URL = 'https://script.google.com/macros/s/AKfycbyRKjyroG9efELUr9-dofSwvn6Qb-nsD_hCCMRItRBFbJ6NOBcffboNDEyCx5Inmy8rxQ/exec';
 

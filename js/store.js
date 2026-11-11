@@ -2,7 +2,7 @@
 // internet; js/sync.js also keeps a copy in the family's cloud so it follows each
 // student to other devices. Every access is wrapped so the app still works when
 // storage is blocked.
-import { NEXT_SKILL, BASE_SKILL, MAX_LEVEL } from './math.js?v=25';
+import { NEXT_SKILL, BASE_SKILL, MAX_LEVEL } from './math.js?v=26';
 
 // Each player (Mila, and classmates who play on this device) has their own saved data.
 const OLD_KEY = 'mila-rainbow-math-v1';          // before players existed (Mila only)
@@ -44,7 +44,11 @@ export function defaults() {
     },
     quizzes: [], // newest first: { date, level, n, k, passed, counted, items: [...] }
     prizes: [], // real-life prizes a grown-up set: { id, title, icon, goal, won, given }
-    rewards: { pieces: 0, friends: [], star: false, awarded: [] },
+    // care: how each island friend is doing ({ fed, got, day, today, last, knows, pets }, see js/critters.js)
+    // gave: treats she gave on friends' islands; treatsFrom: pieces she had when treats began
+    rewards: { pieces: 0, friends: [], star: false, awarded: [], care: {}, gave: 0, treatsFrom: null },
+    // visiting friends' islands (a grown-up turns it on and adds friends' island codes)
+    island: { code: null, share: false, friends: [], visitors: [], seenAt: '', sent: {} },
     sessions: [],
     active: null,
     visits: 0,

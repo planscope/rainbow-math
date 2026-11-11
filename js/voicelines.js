@@ -146,6 +146,16 @@ export const LINES = {
   lu_tens: { en: ['[cheerful] How many? Count the tens, then the ones!', '[curious] Tap the tens bars first: ten, twenty... then the ones!'], es: '[cheerful] ¿Cuántos hay? ¡Cuenta las decenas y luego las unidades!' },
   lu_bigger: { en: ['[curious] Which number is bigger? Tap it!', '[cheerful] Look at the tens! Which number is bigger?'], es: '[curious] ¿Qué número es más grande? ¡Tócalo!' },
   lu_pic: { en: '[cheerful] Tap your three secret pictures!', es: '[cheerful] ¡Toca tus tres dibujos secretos!' },
+  // ---- island friends (v26): an island friend talks when she feeds it, pets it, visits
+  care_yum: { en: ['[happy] Yum yum! Thank you!', '[giggles] Mmm, so tasty! Thank you!'], es: '[happy] ¡Ñam ñam! ¡Gracias!' },
+  care_fav: { en: ['[excited] Ooh, my favorite! Yummy yummy!', '[gasps] My very favorite! Thank you, thank you!'], es: '[excited] ¡Uy, mi comida favorita! ¡Qué rico!' },
+  care_full: { en: "[happy] I'm so full! Thank you! Come play tomorrow!", es: '[happy] ¡Ya no me cabe nada! ¡Gracias! ¡Ven a jugar mañana!' },
+  care_pet: { en: ['[giggles] Hee hee, that tickles!', '[happy] I love you too!'], es: '[giggles] ¡Ji ji, me haces cosquillas!' },
+  care_none: { en: '[gently] No treats left. Solve some problems to earn more!', es: '[gently] Ya no quedan golosinas. ¡Resuelve problemas para ganar más!' },
+  care_hatch: { en: '[excited] A baby friend hatched on your island!', es: '[excited] ¡Nació un bebé amigo en tu isla!' },
+  visit_hi: { en: "[excited] Let's fly to your friend's island!", es: '[excited] ¡Vamos volando a la isla de tu amigo!' },
+  visit_gift: { en: '[happy] What a sweet gift! Your friend will see it!', es: '[happy] ¡Qué lindo regalo! ¡Lo va a ver!' },
+  visit_got: { en: '[excited] Someone visited your island and left a gift!', es: '[excited] ¡Alguien visitó tu isla y te dejó un regalo!' },
   one_more_star: { en: ['[excited] Just one more star to the next level!', '[happy] One more star and you level up!'], es: '[excited] ¡Solo una estrella más para el siguiente nivel!' },
   prize_close: { en: ["[excited] Almost there! Just a few more rainbow pieces for your prize!", "[gasps] You're so close to your prize! Keep going!"], es: '[excited] ¡Ya casi! ¡Unas piezas más de arcoíris para tu premio!' },
 };
@@ -203,8 +213,8 @@ export function allLines() {
 // her screen ("Nine plus two... how many is that?"). Each explanation is recorded whole,
 // once per number combination that can really happen (found from the step builder).
 // Only the numbers a line needs are used, so there are about 430 English recordings.
-import { buildSteps } from './math.js?v=25';
-import { buildMulSteps, allMulProblems } from './mult.js?v=25';
+import { buildSteps } from './math.js?v=26';
+import { buildMulSteps, allMulProblems } from './mult.js?v=26';
 
 export const EXPLAIN = {
   x_ones_sum: { from: 'w_ones_sum', params: ['x', 'y'], en: "[curious] Let's add the ones. {x} plus {y}... how many is that?" },
@@ -276,7 +286,7 @@ export function allExplanations(lang = 'en') {
 // ---------------------------------------------------------------- "Read to me" (English)
 // Problems and stories have different numbers every time, so "Read to me" joins short
 // recordings: the story pieces between the numbers, the numbers 0-100, and "What is ... plus ...?".
-import { STORIES } from './i18n.js?v=25';
+import { STORIES } from './i18n.js?v=26';
 
 const OPN = { '+': 'add', '-': 'sub', '×': 'mul' };
 const READ_WORDS = {

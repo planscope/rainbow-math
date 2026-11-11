@@ -1,16 +1,18 @@
 // Mila's Rainbow Math Adventure: screens and interaction.
-import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL, mistakePattern } from './math.js?v=25';
-import * as M from './model.js?v=25';
-import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=25';
-import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL, QUIZ, passLevel, failQuiz, quizPlan, worldOf, WORLD_COUNT, migratePath } from './levels.js?v=25';
-import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=25';
-import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=25';
-import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults, loadPlayers, savePlayers, addPlayer, removePlayer, pinHash, helpLevel, recordFade, passedFade, onSaved, readData, writeData, dropData } from './store.js?v=25';
-import { createSync, showCode, readCode } from './sync.js?v=25';
-import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking as stopDeviceSpeech, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=25';
-import { playLine, playExplain, playSequence, playParts, stopClips, preloadLines, unlockMedia, voiceInfo, voiceNames } from './voice.js?v=25';
-import { lineText, explainFor, readSequence, clipId } from './voicelines.js?v=25';
-import { LITTLE_LEVELS, LITTLE_WORLDS, LITTLE_SKILLS, littleWorldOf, makeLittle, pickLittle, OBJ_EMOJI, migrateLittle } from './little.js?v=25';
+import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL, mistakePattern } from './math.js?v=26';
+import * as M from './model.js?v=26';
+import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=26';
+import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL, QUIZ, passLevel, failQuiz, quizPlan, worldOf, WORLD_COUNT, migratePath } from './levels.js?v=26';
+import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=26';
+import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=26';
+import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults, loadPlayers, savePlayers, addPlayer, removePlayer, pinHash, helpLevel, recordFade, passedFade, onSaved, readData, writeData, dropData } from './store.js?v=26';
+import { createSync, showCode, readCode, newCode } from './sync.js?v=26';
+import { critterName, critterNick, critterOf, cleanSnap, FOODS, FOOD_KEYS, WAVES, care as careOf, hearts as heartsOf, isFull, treats as treatCount, feed, pet, lineup, nextFriend, takeGifts, sentToday, noteSent, GIFTS_A_DAY } from './critters.js?v=26';
+import { createIslands } from './islands.js?v=26';
+import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking as stopDeviceSpeech, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=26';
+import { playLine, playExplain, playSequence, playParts, stopClips, preloadLines, unlockMedia, voiceInfo, voiceNames } from './voice.js?v=26';
+import { lineText, explainFor, readSequence, clipId } from './voicelines.js?v=26';
+import { LITTLE_LEVELS, LITTLE_WORLDS, LITTLE_SKILLS, littleWorldOf, makeLittle, pickLittle, OBJ_EMOJI, migrateLittle } from './little.js?v=26';
 const stopSpeaking = () => { stopDeviceSpeech(); stopClips(); };
 
 // ---------------------------------------------------------------- setup
@@ -38,9 +40,11 @@ const sync = createSync({
   getPlayers: () => players, savePlayers, readData, writeData, dropData,
   onRemote: (id) => takeRemote(id),
 });
-onSaved((id) => sync.saved(id));
+onSaved((id) => { sync.saved(id); if (player && id === player.id) islandSoon(); });
+// Friends' islands (other families) go through the same cloud.
+const islands = createIslands((body) => sync.call(body));
 // Screens where new progress from another device can appear without surprising her.
-const CALM = ['who', 'welcome', 'island', 'path', 'parent', 'newplayer', 'join'];
+const CALM = ['who', 'welcome', 'island', 'path', 'parent', 'newplayer', 'join', 'visits'];
 // Another device's progress arrived for someone: if it's who's playing, use it now
 // (her half-done problem on this device stays as it is).
 function takeRemote(id) {
@@ -75,6 +79,11 @@ let parentReturn = 'welcome';
 let parentConfirm = false;
 let parentMsg = '';
 let toastTimer = null;
+let careId = null;      // the island friend she is looking after
+let careMsg = null;     // what just happened with it: { key, food, anim }
+let lastPetSay = 0;
+let visit = null;       // the friend's island she is visiting: { code, snap, pick, msg, busy, failed }
+let islandDraft = { code: '', msg: '', busy: false }; // grown-ups adding a friend's island
 
 const L = () => data.settings.lang;
 const speak = (text, lang, opts) => speakRaw(text, lang, (data.settings.voice || {})[lang] || '', opts);
@@ -163,6 +172,9 @@ function render() {
     case 'break': view = viewBreak(); break;
     case 'celebrate': view = viewCelebrate(); break;
     case 'island': view = viewIsland(); break;
+    case 'critter': view = viewCritter(); break;
+    case 'visits': view = viewVisits(); break;
+    case 'visit': view = visit ? viewVisit() : viewVisits(); break;
     case 'path': view = viewPathMap(); break;
     case 'levelup': view = viewLevelUp(); break;
     case 'who': view = viewWho(); break;
@@ -501,7 +513,7 @@ function viewWelcome() {
     h('div', { class: 'rm-corner' }, langButton()),
     h('h1', { class: 'rm-title' }, isLittle() ? T('appNameLittle') : T('appName')),
     rainbowBar(),
-    h('div', { class: 'rm-welcome-scene', html: islandSVG({ pieces: r.pieces, friends: r.friends, rainbows: Math.floor(r.pieces / 7), star: r.star }) }),
+    h('div', { class: 'rm-welcome-scene', html: islandSVG({ pieces: r.pieces, friends: lineup(r, 12, player && player.friend), rainbows: Math.floor(r.pieces / 7), star: r.star }) }),
     h('div', { class: 'rm-welcome-bubble' }, bubbleEl({ mood: 'happy', text: returning ? T('welcomeBack') : T('welcomeHi') })),
     prizeStrip(true),
     nextCard(),
@@ -639,6 +651,7 @@ async function login(pl) {
   migratePath(data.progress.path);
   if (player.little) migrateLittle(data.progress.lpath);
   data.visits = (data.visits || 0) + 1;
+  if (data.rewards.treatsFrom == null) data.rewards.treatsFrom = data.rewards.pieces || 0; // treats start now
   save(data);
   players.last = player.id;
   savePlayers(players);
@@ -650,6 +663,7 @@ async function login(pl) {
   if (!data.progress.placed && !isLittle()) { go('placeIntro'); sayLine('place_start'); return; }
   go('welcome');
   sayLine(isLittle() ? 'lu_hello' : 'hello');
+  checkGifts();
 }
 
 function switchPlayer() {
@@ -2626,6 +2640,7 @@ function viewParentLittle() {
       button(T('p_close'), () => go(parentReturn === 'parent' ? 'welcome' : parentReturn), { cls: 'soft small', ic: 'close', k: 'p-close' })),
     parentMsg ? h('p', { class: 'rm-small ok', role: 'status' }, parentMsg) : null,
     cloudCard(),
+    islandCard(),
     h('section', { class: 'rm-card rm-p-sec' },
       h('h3', { class: 'rm-h3' }, T('p_lskills')),
       h('p', { class: 'rm-small' }, T('p_littleNote')),
@@ -2758,9 +2773,10 @@ function finishSession() {
   s.finished = true;
   const own = s.results.filter((r) => r.independent).length;
   const team = s.results.length - own;
-  let friend = null;
-  const next = CREATURE_ORDER.find((f) => !data.rewards.friends.includes(f));
-  if (next) { data.rewards.friends = [...data.rewards.friends, next]; friend = next; } else data.rewards.star = true;
+  // a new island friend every time: the 12 named ones first, then baby friends forever
+  const friend = nextFriend(data.rewards.friends);
+  if (friend) data.rewards.friends = [...data.rewards.friends, friend];
+  if (CREATURE_ORDER.every((f) => data.rewards.friends.includes(f))) data.rewards.star = true;
   data.sessions = [{ date: new Date().toISOString(), mode: s.mode, done: s.results.length, own, team }, ...data.sessions].slice(0, 30);
   celebrate = { own, team, friend, earned: s.results.length, mode: s.mode };
   data.active = null;
@@ -2768,6 +2784,7 @@ function finishSession() {
   save(data);
   sfx.reward();
   go('celebrate');
+  if (friend && critterOf(friend).baby) setTimeout(() => { if (screen === 'celebrate') sayLine('care_hatch'); }, 900);
 }
 
 // ---------------------------------------------------------------- blocks
@@ -3270,39 +3287,484 @@ function viewCelebrate() {
       h('span', { class: 'rm-chip' }, h('span', { html: pieceSVG(2) }), T('celPieces', { n: c.earned })),
       c.mode === 'path' ? h('span', { class: 'rm-chip' }, h('span', { html: icon('star') }), T('celLevel', { n: data.progress.path.level, s: data.progress.path.stars, g: levelInfo(data.progress.path.level).goal })) : null),
     c.friend
-      ? h('div', { class: 'rm-friend-card photocard new' },
+      ? h('button', { type: 'button', class: 'rm-friend-card photocard new rm-friend-btn', 'data-k': 'cel-friend', onclick: () => openCare(c.friend) },
         h('div', { class: 'rm-friend-art', html: friendSVG(c.friend) }),
-        h('div', null, h('p', { class: 'rm-text' }, T('celFriend')), h('p', { class: 'rm-friend-name' }, CREATURE_NAMES[c.friend][L()])))
+        h('div', null, h('p', { class: 'rm-text' }, critterOf(c.friend).baby ? T('celHatch') : T('celFriend')), h('p', { class: 'rm-friend-name' }, critterName(c.friend, L()))))
       : h('p', { class: 'rm-text' }, T('celAllFriends')),
     h('div', { class: 'rm-actions' },
-      button(null, () => readAloud([T('celTitle'), T('celSolved', { n: c.earned }), c.friend ? `${T('celFriend')} ${CREATURE_NAMES[c.friend][L()]}` : ''].join(' ')), { cls: 'icon soft', ic: 'read', aria: T('read'), k: 'read' }),
+      button(null, () => readAloud([T('celTitle'), T('celSolved', { n: c.earned }), c.friend ? `${critterOf(c.friend).baby ? T('celHatch') : T('celFriend')} ${critterName(c.friend, L())}` : ''].join(' ')), { cls: 'icon soft', ic: 'read', aria: T('read'), k: 'read' }),
       button(T('oneMore'), () => (isLittle() ? startLittle() : startSession(data.settings.practice === 'choose' ? c.mode : data.settings.practice)), { cls: 'primary big', ic: 'next', k: 'more' }),
       button(T('seeIsland'), () => go('island'), { cls: 'big', ic: 'island', k: 'island' }),
       button(T('allDone'), () => go('bye'), { cls: 'big', k: 'done' })));
 }
 
 // ---------------------------------------------------------------- island
+// Her island: friends bob around; tap one to feed it and play. Friends from other
+// houses can visit (when a grown-up turned it on) and leave treats and waves.
+const isl = () => data.island;
+const activeFriends = () => (isl().friends || []).filter((f) => f && f.code && !f.gone);
+// her progress code, once the cloud has her (it proves the island is hers)
+const myCloud = () => {
+  const pl = player && players.players.find((x) => x.id === player.id);
+  return pl && pl.cloud && pl.rev ? pl.cloud : null;
+};
+const ISL_CACHE = 'rainbow-math-island-cache';
+let friendIslands = (() => { try { return JSON.parse(window.localStorage.getItem(ISL_CACHE) || '{}') || {}; } catch (e) { return {}; } })();
+const keepIslands = () => { try { window.localStorage.setItem(ISL_CACHE, JSON.stringify(friendIslands)); } catch (e) { /* ignore */ } };
+
+let islandTimer = null;
+function islandSoon(ms = 4000) {
+  if (!player || !isl() || !isl().share || !isl().code) return;
+  clearTimeout(islandTimer);
+  islandTimer = setTimeout(() => pushIsland(), ms);
+}
+async function pushIsland(force = false) {
+  if (!player || !isl().share || !isl().code || !myCloud()) return { ok: false, error: 'not ready' };
+  try {
+    let r = await islands.put(isl(), myCloud(), player, data, force);
+    if (!r.ok && r.error === 'not yours') {
+      // her progress code changed: the island gets a new code too
+      isl().code = newCode();
+      save(data);
+      r = await islands.put(isl(), myCloud(), player, data, true);
+    }
+    return r;
+  } catch (e) { return { ok: false, error: 'offline' }; }
+}
+// Treats and waves friends left on her island since last time.
+async function checkGifts() {
+  if (!player || !isl() || !isl().share || !isl().code || !myCloud()) return;
+  const who = player.id;
+  try {
+    const gifts = await islands.inbox(isl(), myCloud());
+    if (!gifts.length) return;
+    if (player && player.id === who) {
+      if (takeGifts(data, gifts).length) {
+        save(data);
+        if (CALM.includes(screen) || screen === 'critter') update();
+        if (screen === 'island') sayLine('visit_got');
+      }
+    } else {
+      // she switched players meanwhile: keep the gifts in her saved copy
+      const d = load(who);
+      takeGifts(d, gifts);
+      save(d);
+      if (player) load(player.id);
+    }
+  } catch (e) { /* offline: they wait on the server */ }
+}
+
+function heartsRow(n) {
+  return h('span', { class: 'rm-hearts', role: 'img', 'aria-label': T('heartsAria', { n }) },
+    [0, 1, 2, 3, 4].map((i) => h('span', { class: i < n ? 'on' : '' }, i < n ? '❤️' : '\u{1F90D}')));
+}
+const treatChip = () => h('span', { class: 'rm-chip rm-treats', title: T('treatsHow') }, '\u{1F9FA} ', T('treatsLeft', { n: treatCount(data.rewards) }));
+const visitorText = (v) => (v.food
+  ? T('visitorFed', { who: v.from || '?', friend: critterNick(v.critter, L()), food: FOODS[v.food].e })
+  : T('visitorWaved', { who: v.from || '?', wave: WAVES[v.wave] || '' }));
+const newVisitors = () => (isl().visitors || []).filter((v) => String(v.at) > String(isl().seenAt || ''));
+function seenVisitors() {
+  const v = isl().visitors || [];
+  if (v.length && String(v[0].at) > String(isl().seenAt || '')) { isl().seenAt = v[0].at; save(data); }
+}
+
+function openCare(id) {
+  careId = id;
+  careMsg = null;
+  go('critter');
+}
+function tapScene(e, onPick) {
+  const g = e.target.closest && e.target.closest('[data-critter]');
+  if (g) { unlockAudio(); onPick(g.getAttribute('data-critter')); }
+}
+
 function viewIsland() {
   const r = data.rewards;
   const rainbows = Math.floor(r.pieces / 7);
   const inNext = r.pieces % 7;
+  const out = lineup(r, 12, player && player.friend);
+  const fresh = newVisitors();
+  const all = [...r.friends].reverse(); // newest first
   return h('main', { class: 'rm-screen rm-island' },
     h('div', { class: 'rm-row-top' },
-      button(T('back'), () => go(data.active ? 'welcome' : 'welcome'), { cls: 'soft small', ic: 'back', k: 'back' }),
+      button(T('back'), () => go('welcome'), { cls: 'soft small', ic: 'back', k: 'back' }),
       langButton()),
     h('h2', { class: 'rm-h2' }, T('islandTitle')),
-    h('div', { class: 'rm-island-scene', html: islandSVG({ pieces: r.pieces, friends: r.friends, rainbows, star: r.star }) }),
+    fresh.length ? h('div', { class: 'rm-card rm-visitors-new', role: 'status' },
+      h('p', { class: 'rm-lead' }, `\u{1F48C} ${T('visitorsNew')}`),
+      h('ul', { class: 'rm-visitor-list' }, fresh.slice(0, 6).map((v) => h('li', null, visitorText(v)))),
+      button(T('visitorsOk'), () => { seenVisitors(); update(); }, { cls: 'small primary', k: 'visitors-ok' })) : null,
+    h('div', { class: 'rm-island-scene rm-tap-scene', html: islandSVG({ pieces: r.pieces, friends: out, rainbows, star: r.star }), onclick: (e) => tapScene(e, openCare) }),
+    r.friends.length ? h('p', { class: 'rm-text rm-center' }, T('islandTapHint')) : null,
     h('div', { class: 'rm-island-stats' },
       h('div', { class: 'rm-drops', role: 'img', 'aria-label': T('islandNext', { n: 7 - inNext }) },
         [0, 1, 2, 3, 4, 5, 6].map((i) => h('span', { class: i < inNext ? 'on' : '', html: pieceSVG(i) }))),
       h('p', { class: 'rm-text' }, `${T('islandPieces', { n: r.pieces })} · ${T('islandNext', { n: 7 - inNext })}`),
       rainbows ? h('p', { class: 'rm-text' }, T('islandRainbows', { n: rainbows })) : null),
-    h('h3', { class: 'rm-h3' }, T('islandFriends', { n: r.friends.length, total: CREATURE_ORDER.length })),
+    h('div', { class: 'rm-actions rm-island-actions' },
+      treatChip(),
+      sync.on() ? button(T('visitFriends'), openVisits, { cls: 'big', ic: 'island', k: 'visits' }) : null),
+    h('h3', { class: 'rm-h3' }, T('islandFriendsAll', { n: r.friends.length })),
     r.friends.length
-      ? h('div', { class: 'rm-friends' }, r.friends.map((f) => h('div', { class: 'rm-friend-card photocard' },
-        h('div', { class: 'rm-friend-art', html: friendSVG(f) }),
-        h('p', { class: 'rm-friend-name' }, CREATURE_NAMES[f][L()]))))
-      : h('p', { class: 'rm-text' }, T('islandEmpty')));
+      ? h('div', { class: 'rm-friends' }, all.map((id) => h('button', { type: 'button', class: 'rm-friend-card photocard rm-friend-btn', 'data-k': `fr-${id}`, onclick: () => openCare(id) },
+        h('div', { class: 'rm-friend-art', html: friendSVG(id) }),
+        h('p', { class: 'rm-friend-name' }, critterName(id, L())),
+        heartsRow(heartsOf(careOf(r, id))))))
+      : h('p', { class: 'rm-text' }, T('islandEmpty')),
+    h('p', { class: 'rm-text rm-center' }, T('islandHatchHint')));
+}
+
+// ---------------------------------------------------------------- one island friend: feed it, pet it
+function viewCritter() {
+  const r = data.rewards;
+  const id = careId;
+  if (!id || !r.friends.includes(id)) { screen = 'island'; return viewIsland(); }
+  const c = careOf(r, id);
+  const info = critterOf(id);
+  const full = isFull(c);
+  const left = treatCount(r);
+  const nick = critterNick(id, L());
+  const name = critterName(id, L());
+  const foodA = (f) => (FOODS[f].a[L()] || FOODS[f].a.en);
+  const msg = careMsg
+    ? T(careMsg.key, { who: nick, food: careMsg.food ? foodA(careMsg.food) : '' })
+    : full ? T('careFull', { who: nick }) : left ? T('careHi', { who: nick }) : T('careNone');
+  return h('main', { class: 'rm-screen rm-care' },
+    h('div', { class: 'rm-row-top' },
+      button(T('back'), () => go('island'), { cls: 'soft small', ic: 'back', k: 'back' }),
+      langButton()),
+    h('div', { class: 'rm-care-stage' },
+      h('button', { type: 'button', class: `rm-care-art ${careMsg && careMsg.anim ? `do-${careMsg.anim}` : ''}`, 'data-k': 'care-pet', 'aria-label': T('carePetAria', { who: nick }), html: friendSVG(id), onclick: petNow }),
+      h('div', { class: 'rm-care-fx', 'aria-hidden': 'true' })),
+    h('h2', { class: 'rm-h2' }, name),
+    heartsRow(heartsOf(c)),
+    h('p', { class: 'rm-big-text rm-care-msg', 'aria-live': 'polite' }, msg),
+    h('p', { class: 'rm-text rm-center' }, c.knows ? T('careFav', { food: `${FOODS[info.fav].e} ${FOODS[info.fav][L()]}` }) : T('careFavUnknown')),
+    h('div', { class: 'rm-center' }, treatChip()),
+    h('div', { class: 'rm-food-tray', role: 'group', 'aria-label': T('careFoods') },
+      FOOD_KEYS.map((f) => h('button', {
+        type: 'button', class: `rm-food ${full || !left ? 'dim' : ''}`, 'data-k': `food-${f}`, 'aria-label': FOODS[f][L()],
+        onclick: () => { unlockAudio(); feedNow(f); },
+      }, FOODS[f].e))),
+    h('div', { class: 'rm-actions' },
+      button(null, () => readAloud(`${name}. ${msg}`), { cls: 'icon soft', ic: 'read', aria: T('read'), k: 'read' }),
+      button(T('careBack'), () => go('island'), { cls: 'big', ic: 'island', k: 'island' })));
+}
+
+function feedNow(food) {
+  const res = feed(data.rewards, careId, food);
+  if (!res.ok) {
+    careMsg = { key: res.why === 'full' ? 'careFull' : 'careNone' };
+    sfx.soft();
+    sayLine(res.why === 'full' ? 'care_full' : 'care_none');
+    update();
+    return;
+  }
+  careMsg = { key: res.fav ? 'careFavYum' : res.full ? 'careYumFull' : 'careYum', food, anim: res.fav ? 'dance' : 'munch' };
+  save(data);
+  update();
+  flyFood(food, '.rm-care-art');
+  careBurst(res.fav ? 9 : 4, res.fav ? '\u{1F496}' : '❤️');
+  sfx.pop();
+  setTimeout(() => (res.fav ? sfx.reward() : sfx.tap()), 450);
+  sayLine(res.fav ? 'care_fav' : res.full ? 'care_full' : 'care_yum');
+}
+
+function petNow() {
+  if (!pet(data.rewards, careId)) return;
+  careMsg = { key: 'carePet', anim: 'wiggle' };
+  save(data);
+  update();
+  careBurst(3, '✨');
+  sfx.pop();
+  if (Date.now() - lastPetSay > 4000) { lastPetSay = Date.now(); sayLine('care_pet'); }
+}
+
+// A treat flies from its button into the friend's mouth.
+function flyFood(food, toSel) {
+  if (reduced()) return;
+  const from = root.querySelector(`[data-k="food-${food}"]`);
+  const to = root.querySelector(toSel);
+  if (!from || !to) return;
+  const a = from.getBoundingClientRect();
+  const b = to.getBoundingClientRect();
+  const el = document.createElement('div');
+  el.className = 'rm-fly-food';
+  el.setAttribute('aria-hidden', 'true');
+  el.textContent = FOODS[food].e;
+  el.style.left = `${a.left + a.width / 2}px`;
+  el.style.top = `${a.top + a.height / 2}px`;
+  document.body.appendChild(el);
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    el.style.transform = `translate(-50%, -50%) translate(${b.left + b.width / 2 - (a.left + a.width / 2)}px, ${b.top + b.height * 0.6 - (a.top + a.height / 2)}px) scale(.35)`;
+    el.style.opacity = '0.3';
+  }));
+  setTimeout(() => el.remove(), 700);
+}
+// Little hearts float up around the friend.
+function careBurst(n, ch) {
+  if (reduced()) return;
+  const fx = root.querySelector('.rm-care-fx');
+  if (!fx) return;
+  for (let i = 0; i < n; i++) {
+    const s = document.createElement('span');
+    s.textContent = ch;
+    s.style.setProperty('--x', `${Math.round((Math.random() - 0.5) * 220)}px`);
+    s.style.setProperty('--d', `${(0.35 + i * 0.07).toFixed(2)}s`);
+    fx.appendChild(s);
+    setTimeout(() => s.remove(), 1900);
+  }
+}
+
+// ---------------------------------------------------------------- visiting friends' islands
+function openVisits() {
+  visit = null;
+  seenVisitors();
+  go('visits');
+  refreshFriendIslands();
+}
+async function refreshFriendIslands() {
+  await Promise.all(activeFriends().map(async (f) => {
+    try {
+      const snap = await islands.get(f.code);
+      friendIslands[f.code] = snap ? cleanSnap(snap) : { gone: true };
+    } catch (e) { /* offline: show what we saw last time */ }
+  }));
+  keepIslands();
+  if (screen === 'visits') update();
+}
+
+function viewVisits() {
+  const list = activeFriends();
+  const came = (isl().visitors || []).slice(0, 8);
+  return h('main', { class: 'rm-screen rm-visits' },
+    h('div', { class: 'rm-row-top' },
+      button(T('back'), () => go('island'), { cls: 'soft small', ic: 'back', k: 'back' }),
+      langButton()),
+    h('h2', { class: 'rm-h2' }, T('visitTitle')),
+    list.length
+      ? h('div', { class: 'rm-isl-list' }, list.map((f) => {
+        const sn = friendIslands[f.code];
+        const ok = sn && !sn.gone;
+        return h('button', { type: 'button', class: 'rm-isl-card', 'data-k': `isl-${f.code}`, disabled: !!(sn && sn.gone), onclick: () => openVisit(f.code) },
+          h('div', { class: 'rm-isl-mini', html: islandSVG(ok ? { pieces: sn.pieces, friends: sn.out, rainbows: Math.floor(sn.pieces / 7), star: sn.star } : {}) }),
+          h('b', null, T('visitIslandOf', { who: (ok && sn.name) || f.name })),
+          h('span', { class: 'rm-small' }, sn && sn.gone ? T('visitClosed') : ok ? T('visitCount', { n: sn.count }) : T('visitLoading')));
+      }))
+      : bubbleEl({ mood: 'happy', text: T('visitNone') }),
+    came.length ? h('section', { class: 'rm-card' },
+      h('h3', { class: 'rm-h3' }, T('visitWhoCame')),
+      h('ul', { class: 'rm-visitor-list' }, came.map((v) => h('li', null, visitorText(v))))) : null,
+    h('p', { class: 'rm-text rm-center' }, isl().share ? T('visitYoursOpen') : T('visitYoursClosed')));
+}
+
+async function openVisit(code) {
+  const sn = friendIslands[code];
+  visit = { code, snap: sn && !sn.gone ? sn : null, pick: null, msg: null, busy: false, failed: false };
+  go('visit');
+  sayLine('visit_hi');
+  try {
+    const fresh = await islands.get(code);
+    if (!visit || visit.code !== code) return;
+    if (fresh) { visit.snap = cleanSnap(fresh); friendIslands[code] = visit.snap; keepIslands(); } else { friendIslands[code] = { gone: true }; visit.failed = !visit.snap; }
+  } catch (e) { if (visit && visit.code === code) visit.failed = !visit.snap; }
+  if (screen === 'visit') update();
+}
+
+function viewVisit() {
+  const v = visit;
+  const sn = v.snap;
+  const f = (isl().friends || []).find((x) => x.code === v.code);
+  const who = (sn && sn.name) || (f && f.name) || '';
+  const sent = sentToday(isl(), v.code);
+  const left = treatCount(data.rewards);
+  const top = h('div', { class: 'rm-row-top' },
+    button(T('back'), () => { visit = null; go('visits'); }, { cls: 'soft small', ic: 'back', k: 'back' }),
+    langButton());
+  if (!sn) {
+    return h('main', { class: 'rm-screen rm-visit' }, top,
+      h('h2', { class: 'rm-h2' }, T('visitIslandOf', { who })),
+      h('p', { class: 'rm-big-text' }, v.failed ? T('visitOffline') : T('visitLoading')));
+  }
+  const pickNick = v.pick ? critterNick(v.pick, L()) : '';
+  const tooMany = sent.treats >= GIFTS_A_DAY;
+  return h('main', { class: 'rm-screen rm-visit' }, top,
+    h('h2', { class: 'rm-h2' }, T('visitIslandOf', { who })),
+    h('div', { class: 'rm-island-scene rm-tap-scene', html: islandSVG({ pieces: sn.pieces, friends: sn.out, rainbows: Math.floor(sn.pieces / 7), star: sn.star }), onclick: (e) => tapScene(e, pickVisitFriend) }),
+    h('p', { class: 'rm-text rm-center' }, `${T('visitCount', { n: sn.count })} · ${T('visitTapHint', { who })}`),
+    h('div', { class: 'rm-visit-friends' }, sn.out.map((id) => h('button', {
+      type: 'button', class: 'rm-visit-friend', 'aria-pressed': String(v.pick === id), 'data-k': `vf-${id}`,
+      onclick: () => pickVisitFriend(id),
+    }, h('span', { class: 'rm-visit-friend-art', html: friendSVG(id) }), h('span', { class: 'rm-small' }, critterNick(id, L())), heartsRow(sn.hearts[id] || 0)))),
+    v.pick ? h('section', { class: 'rm-card rm-visit-feed' },
+      h('div', { class: 'rm-visit-pick-art', html: friendSVG(v.pick) }),
+      h('p', { class: 'rm-lead' }, T('visitFeedQ', { friend: pickNick })),
+      h('div', { class: 'rm-food-tray small', role: 'group', 'aria-label': T('careFoods') },
+        FOOD_KEYS.map((food) => h('button', {
+          type: 'button', class: `rm-food ${tooMany || !left ? 'dim' : ''}`, 'data-k': `food-${food}`, 'aria-label': FOODS[food][L()], disabled: v.busy,
+          onclick: () => { unlockAudio(); giveTreat(food); },
+        }, FOODS[food].e)))) : null,
+    v.msg ? h('p', { class: 'rm-big-text rm-center', 'aria-live': 'polite' }, v.msg) : null,
+    h('div', { class: 'rm-center' }, treatChip()),
+    h('h3', { class: 'rm-h3' }, T('visitWave')),
+    h('div', { class: 'rm-wave-row' }, Object.entries(WAVES).map(([k, e]) => h('button', {
+      type: 'button', class: 'rm-wave', 'data-k': `wave-${k}`, 'aria-label': `${T('visitWave')} ${e}`, disabled: v.busy || sent.waves >= 1,
+      onclick: () => { unlockAudio(); sendWave(k); },
+    }, e))),
+    sent.waves >= 1 && !v.msg ? h('p', { class: 'rm-text rm-center' }, T('visitWaveDone')) : null);
+}
+
+// She picked one of her friend's island friends: the treats show up right under it.
+function pickVisitFriend(id) {
+  if (!visit) return;
+  visit.pick = id;
+  visit.msg = null;
+  sfx.tap();
+  update();
+  const panel = root.querySelector('.rm-visit-feed');
+  if (panel && panel.scrollIntoView) panel.scrollIntoView({ behavior: reduced() ? 'auto' : 'smooth', block: 'center' });
+}
+
+async function giveTreat(food) {
+  const v = visit;
+  if (!v || !v.pick || v.busy) return;
+  const who = (v.snap && v.snap.name) || '';
+  if (treatCount(data.rewards) <= 0) { v.msg = T('careNone'); sayLine('care_none'); sfx.soft(); update(); return; }
+  if (sentToday(isl(), v.code).treats >= GIFTS_A_DAY) { v.msg = T('visitEnough'); sfx.soft(); update(); return; }
+  v.busy = true;
+  update();
+  let ok = false;
+  try { ok = !!(await islands.gift(v.code, { from: player.name, critter: v.pick, food })).ok; } catch (e) { ok = false; }
+  v.busy = false;
+  if (ok) {
+    data.rewards.gave = (data.rewards.gave || 0) + 1;
+    noteSent(isl(), v.code, 'treat');
+    save(data);
+    v.msg = T('visitGave', { friend: critterNick(v.pick, L()), food: FOODS[food].e, who });
+    if (screen !== 'visit') return;
+    update();
+    flyFood(food, '.rm-visit-pick-art');
+    sfx.reward();
+    sayLine('visit_gift');
+  } else {
+    v.msg = T('visitOffline');
+    if (screen === 'visit') update();
+  }
+}
+
+async function sendWave(k) {
+  const v = visit;
+  if (!v || v.busy || sentToday(isl(), v.code).waves >= 1) return;
+  const who = (v.snap && v.snap.name) || '';
+  v.busy = true;
+  update();
+  let ok = false;
+  try { ok = !!(await islands.gift(v.code, { from: player.name, wave: k })).ok; } catch (e) { ok = false; }
+  v.busy = false;
+  if (ok) {
+    noteSent(isl(), v.code, 'wave');
+    save(data);
+    v.msg = T('visitWaved', { who, wave: WAVES[k] });
+    sfx.reward();
+  } else v.msg = T('visitOffline');
+  if (screen === 'visit') update();
+}
+
+// ---------------------------------------------------------------- grown-ups: friends' islands
+function islandCard() {
+  if (!sync.on() || !player) return null;
+  const I = isl();
+  const cloud = myCloud();
+  const list = activeFriends();
+  const input = h('input', {
+    type: 'text', class: 'rm-input rm-code-input', maxlength: '9', autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false',
+    placeholder: 'K7M2-Q9XF', value: islandDraft.code, 'aria-label': T('p_islPlaceholder'), 'data-k': 'isl-input',
+    oninput: (e) => { islandDraft.code = e.target.value.toUpperCase().slice(0, 9); },
+    onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); addFriendIsland(); } },
+  });
+  return h('section', { class: 'rm-card rm-p-sec rm-isl-p' },
+    h('h3', { class: 'rm-h3' }, `\u{1F3DD}️ ${T('p_islTitle')}`),
+    h('p', { class: 'rm-small' }, T('p_islNote')),
+    !cloud ? h('p', { class: 'rm-small' }, T('p_codeWait'))
+      : I.share && I.code
+        ? h('div', null,
+          h('p', null, h('span', { class: 'rm-small' }, `${T('p_islCode')}: `), h('b', { class: 'rm-code', 'data-k': 'isl-code' }, showCode(I.code))),
+          h('p', { class: 'rm-small' }, T('p_islGive')),
+          h('div', { class: 'rm-row' },
+            button(T('p_islOff'), islandOff, { cls: 'small soft', k: 'isl-off' }),
+            button(T('p_islNew'), islandNewCode, { cls: 'small soft', k: 'isl-new' })))
+        : button(T('p_islOn'), islandOn, { cls: 'primary', ic: 'island', k: 'isl-on' }),
+    h('h4', { class: 'rm-h4' }, T('p_islFriends')),
+    list.length
+      ? h('ul', { class: 'rm-plist' }, list.map((f) => h('li', null,
+        h('b', null, f.name || '?'),
+        h('span', { class: 'rm-small rm-code' }, showCode(f.code)),
+        button(T('p_islRemove'), () => removeFriendIsland(f.code), { cls: 'small soft', k: `isl-rm-${f.code}` }))))
+      : h('p', { class: 'rm-small' }, T('p_islNoFriends')),
+    h('div', { class: 'rm-row rm-isl-add' },
+      input,
+      button(T('p_islAdd'), addFriendIsland, { cls: 'small primary', k: 'isl-add', disabled: islandDraft.busy })),
+    islandDraft.msg ? h('p', { class: 'rm-small', role: 'status' }, islandDraft.msg) : null);
+}
+
+async function islandOn() {
+  const I = isl();
+  if (!I.code) I.code = newCode();
+  I.share = true;
+  save(data);
+  update();
+  const r = await pushIsland(true);
+  parentMsg = r.ok ? T('p_islOpened') : T('p_islOffline');
+  if (!r.ok) { I.share = false; save(data); }
+  update();
+}
+async function islandOff() {
+  const I = isl();
+  I.share = false;
+  save(data);
+  try { if (I.code && myCloud()) await islands.close(I.code, myCloud()); } catch (e) { /* the row stays until next time */ }
+  parentMsg = T('p_islClosed');
+  update();
+}
+async function islandNewCode() {
+  const I = isl();
+  try { if (I.code && myCloud()) await islands.close(I.code, myCloud()); } catch (e) { parentMsg = T('p_islOffline'); update(); return; }
+  I.code = newCode();
+  save(data);
+  const r = await pushIsland(true);
+  parentMsg = r.ok ? T('p_islNewDone') : T('p_islOffline');
+  update();
+}
+async function addFriendIsland() {
+  if (islandDraft.busy) return;
+  const code = readCode(islandDraft.code);
+  if (!code) { islandDraft.msg = T('p_islBad'); update(); return; }
+  if (code === isl().code) { islandDraft.msg = T('p_islOwn'); update(); return; }
+  islandDraft.busy = true;
+  islandDraft.msg = '';
+  update();
+  try {
+    const snap = await islands.get(code);
+    if (!snap) islandDraft.msg = T('p_islNotFound');
+    else {
+      const sn = cleanSnap(snap);
+      friendIslands[code] = sn;
+      keepIslands();
+      const I = isl();
+      I.friends = [...(I.friends || []).filter((f) => f.code !== code), { code, name: sn.name, at: new Date().toISOString() }];
+      save(data);
+      islandDraft = { code: '', msg: T('p_islAdded', { who: sn.name }), busy: false };
+    }
+  } catch (e) { islandDraft.msg = T('p_islOffline'); }
+  islandDraft.busy = false;
+  update();
+}
+function removeFriendIsland(code) {
+  const I = isl();
+  // kept as "gone" so the other devices learn she removed it
+  I.friends = (I.friends || []).map((f) => (f.code === code ? { ...f, gone: true, at: new Date().toISOString() } : f));
+  save(data);
+  update();
 }
 
 // ---------------------------------------------------------------- parent area
@@ -3415,6 +3877,7 @@ function viewParent() {
       button(T('p_close'), () => go(parentReturn === 'parent' ? 'welcome' : parentReturn), { cls: 'soft small', ic: 'close', k: 'p-close' })),
     parentMsg ? h('p', { class: 'rm-small ok', role: 'status' }, parentMsg) : null,
     cloudCard(),
+    islandCard(),
     learningSection(),
     prizesSection(),
     h('section', { class: 'rm-card rm-p-sec' },
@@ -3564,7 +4027,7 @@ function voiceCheck() {
     h('div', { class: 'rm-field-l' }, T('vc_title')),
     h('p', { class: 'rm-small' }, T('vc_voice', { lang: lang === 'es' ? 'Español' : 'English', who: (voiceNamesCache && voiceNamesCache[lang]) || '\u2026' })),
     h('p', { class: 'rm-small' }, `${T('vc_last')}: ${last}`),
-    h('p', { class: 'rm-small' }, `iPad: ${vi.ios ? T('p_on') : T('p_off')} \u00b7 ${T('p_sound')}: ${data.settings.sound ? T('p_on') : T('p_off')} \u00b7 v25${vi.unlockError ? ` \u00b7 unlock: ${vi.unlockError}` : ''}${vi.mediaError ? ` \u00b7 player: ${vi.mediaError}` : ''}`),
+    h('p', { class: 'rm-small' }, `iPad: ${vi.ios ? T('p_on') : T('p_off')} \u00b7 ${T('p_sound')}: ${data.settings.sound ? T('p_on') : T('p_off')} \u00b7 v26${vi.unlockError ? ` \u00b7 unlock: ${vi.unlockError}` : ''}${vi.mediaError ? ` \u00b7 player: ${vi.mediaError}` : ''}`),
     button(T('vc_test'), () => { unlockMedia(); unlockAudio(); sayLine('hello'); setTimeout(() => { if (screen === 'parent') update(); }, 1200); }, { cls: 'small', ic: 'read', k: 'vc-test' }));
 }
 
@@ -3608,6 +4071,7 @@ function catchUp() {
   if (!sync.on()) return;
   sync.upAll();
   for (const pl of players.players) if (pl.cloud && (!player || pl.id !== player.id || CALM.includes(screen))) pullNow(pl.id);
+  checkGifts();
 }
 catchUp();
 document.addEventListener('visibilitychange', () => {

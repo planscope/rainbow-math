@@ -15,7 +15,11 @@ and subtraction by seeing and moving tens and ones. English and Spanish.
 | `js/mult.js` | First multiplication: equal groups and rows, with step-by-step help. |
 | `js/app.js` | Screens: welcome, choose adventure, problems, help, break, celebration, island, grown-ups. |
 | `js/i18n.js` | Every word in English and Spanish, short stories, island friends. |
-| `js/art.js` | Original artwork drawn as SVG: Lumi the rainbow dragon, 12 friends, the island, icons. |
+| `js/art.js` | Original artwork drawn as SVG: Lumi the rainbow dragon, 12 friends (and their baby versions), the island, icons. |
+| `js/critters.js` | Island friends that never run out, treats, feeding and hearts, what friends see on a visit. |
+| `js/islands.js` | Visiting friends' islands in other houses (through the family's Google Sheet). |
+| `js/sync.js`, `js/merge.js` | Progress saved to the family's Google Sheet and put together across devices. |
+| `cloud/Code.gs` | The small Google Apps Script web app behind the Sheet (progress and islands). |
 | `js/store.js` | Saves settings and progress in this browser (localStorage) and the gentle level-up rules. |
 | `js/audio.js` | Soft sound effects (no failure sound) and read-aloud with the device's voices. |
 | `tests/` | `npm test` runs the math, blocks, language and progress checks. |
@@ -63,7 +67,23 @@ The page is unlisted, not private: anyone with the link can open it.
   always describe the same state. This is checked for all 5,000+ valid problems
   in the tests.
 - Every finished problem earns a rainbow piece, with or without help. Every
-  finished adventure brings a new friend to the island. Nothing is ever taken away.
+  finished adventure brings a new friend to the island: the 12 named friends first,
+  then baby friends forever (each with its own color, hat or bow, and name).
+  Nothing is ever taken away.
+
+## Island friends and visits
+
+- Every solved problem also earns a treat (plus 10 to start). Tap a friend on the
+  island to feed it (3 treats a day each, then "I'm full!") or pet it. Each friend has
+  a secret favorite food to discover, and hearts grow with care.
+- Visits between houses are off until a grown-up turns them on for a child (grown-ups
+  area, "Friends' islands"). That gives an island code, separate from the progress
+  code, to share with a friend's grown-up, who adds it on their child's page.
+- A visitor sees only the island, its friends and the child's first name. They can
+  leave a treat for one friend (3 per island per day, from their own treats) or a
+  wave. No chat and no typing. Gifts show up on the owner's island next time.
+- Only the owner's devices can change or close an island; closing it or making a new
+  code cuts off old visitors.
 
 ## Updating
 

@@ -1,5 +1,6 @@
 // Original artwork, drawn as inline SVG: Lumi the rainbow dragon, the island
 // friends, the island itself and the interface icons.
+import { critterOf } from './critters.js?v=26';
 
 const INK = '#2b2140';
 export const RAINBOW = ['#ff6b6b', '#ffa94d', '#ffd43b', '#69db7c', '#4dabf7', '#748ffc', '#da77f2'];
@@ -168,9 +169,30 @@ const FRIEND = {
     ${face(50, 48)}`,
 };
 
-export function friendSVG(type, cls = 'rm-friend-svg') {
-  const draw = FRIEND[type] || FRIEND.fox;
-  return `<svg viewBox="0 0 100 100" class="${cls}" aria-hidden="true" focusable="false">${draw()}</svg>`;
+// Baby friends: the same 12 kinds, turned to a new color, wearing something of their own.
+const hueDef = (h) => `<filter id="rmh${h}" color-interpolation-filters="sRGB"><feColorMatrix type="hueRotate" values="${h}"/></filter>`;
+const ACC = {
+  bow: '<g transform="translate(66 24)"><path d="M0 0 L-11 -7 L-11 7Z M0 0 L11 -7 L11 7Z" fill="#f06595" stroke="#c2255c" stroke-width="1.5" stroke-linejoin="round"/><circle r="3.6" fill="#c2255c"/></g>',
+  crown: '<path d="M36 22 L38 8 L45 16 L50 5 L55 16 L62 8 L64 22Z" fill="#fcc419" stroke="#e67700" stroke-width="1.6" stroke-linejoin="round"/><circle cx="50" cy="17" r="2.4" fill="#f06595"/>',
+  flower: '<g transform="translate(33 22)">' + [0, 72, 144, 216, 288].map((d) => `<circle cx="${(6 * Math.cos((d * Math.PI) / 180)).toFixed(1)}" cy="${(6 * Math.sin((d * Math.PI) / 180)).toFixed(1)}" r="4.6" fill="#fff" stroke="#ffa8a8" stroke-width="1.2"/>`).join('') + '<circle r="3.6" fill="#ffd43b"/></g>',
+  hat: '<path d="M39 25 L50 3 L61 25Z" fill="#748ffc" stroke="#4263eb" stroke-width="1.5" stroke-linejoin="round"/><path d="M44.5 14 L55.5 14 M42 20 L58 20" stroke="#ffd43b" stroke-width="2.4"/><circle cx="50" cy="3" r="3.6" fill="#ff8787"/>',
+  star: '<path d="M68 12 l2.6 5.4 5.9.8 -4.3 4.1 1 5.9 -5.2-2.8 -5.2 2.8 1-5.9 -4.3-4.1 5.9-.8z" fill="#ffd43b" stroke="#f08c00" stroke-width="1.3" stroke-linejoin="round"/>',
+  leaf: '<path d="M50 22 C50 16 50 12 52 8" stroke="#2f9e44" stroke-width="2.4" fill="none" stroke-linecap="round"/><path d="M52 9 C60 2 68 6 66 12 C60 14 55 13 52 9Z" fill="#69db7c" stroke="#2f9e44" stroke-width="1.4"/>',
+  heart: '<path d="M66 30 C58 24 58 16 63 15 C66 14.5 66 17 66 18 C66 17 66 14.5 69 15 C74 16 74 24 66 30Z" fill="#ff6b9d" stroke="#d6336c" stroke-width="1.4" stroke-linejoin="round"/>',
+  beanie: '<path d="M29 30 C30 12 70 12 71 30Z" fill="#63e6be" stroke="#0ca678" stroke-width="1.6"/><path d="M29 30 H71" stroke="#0ca678" stroke-width="4" stroke-linecap="round"/><circle cx="50" cy="12" r="5" fill="#fff" stroke="#0ca678" stroke-width="1.4"/>',
+  none: '',
+};
+// The inside of one friend's drawing (100 x 100), plus any color filter it needs.
+export function critterParts(id) {
+  const c = critterOf(id);
+  const draw = FRIEND[c.species] || FRIEND.fox;
+  const body = c.hue ? `<g filter="url(#rmh${c.hue})">${draw()}</g>` : draw();
+  return { defs: c.hue ? hueDef(c.hue) : '', body: body + (ACC[c.acc] || '') };
+}
+
+export function friendSVG(id, cls = 'rm-friend-svg') {
+  const { defs, body } = critterParts(id);
+  return `<svg viewBox="0 0 100 100" class="${cls}" aria-hidden="true" focusable="false" overflow="visible">${defs ? `<defs>${defs}</defs>` : ''}${body}</svg>`;
 }
 
 // ---------------------------------------------------------------- island
@@ -196,12 +218,17 @@ export function islandSVG({ pieces = 0, friends = [], rainbows = 0, star = false
   if (rainbows >= 6) deco.push(`<g transform="translate(350 236)"><path d="M-12 0 h24 l-4 -10 h-16z" fill="#a5d8ff"/><path d="M0 -10 Q-8 -26 -14 -14 M0 -10 Q8 -26 14 -14" stroke="#4dabf7" stroke-width="2.5" fill="none"/></g>`);
   if (star) deco.push(`<path d="M200 28 l5 10.5 11.5 1.6 -8.3 8 2 11.4 -10.2-5.4 -10.2 5.4 2-11.4 -8.3-8 11.5-1.6z" fill="#fcc419" stroke="#f08c00" stroke-width="1.5"/>`);
 
-  const fr = friends.slice(0, SLOTS.length).map((type, i) => {
+  const defs = new Set();
+  const fr = friends.slice(0, SLOTS.length).map((id, i) => {
     const [x, y] = SLOTS[i];
-    return `<g transform="translate(${x - 19} ${y - 36}) scale(.38)">${FRIEND[type] ? FRIEND[type]() : ''}</g>`;
+    const p = critterParts(id);
+    if (p.defs) defs.add(p.defs);
+    // the inner group bobs (CSS), the outer one says where she stands; the clear square makes her easy to tap
+    return `<g transform="translate(${x - 19} ${y - 36}) scale(.38)"><g class="rm-isl-critter" data-critter="${id}" style="--d:${(i * 0.37) % 2}s"><rect x="-4" y="-8" width="108" height="112" fill="transparent"/>${p.body}</g></g>`;
   }).join('');
 
   return `<svg viewBox="0 0 400 260" class="rm-island-svg" role="img" aria-hidden="true" focusable="false">
+    ${defs.size ? `<defs>${[...defs].join('')}</defs>` : ''}
     <rect x="0" y="0" width="400" height="260" fill="#e7f5ff"/>
     <circle cx="352" cy="42" r="22" fill="#ffe066"/>
     <g fill="#fff"><ellipse cx="70" cy="50" rx="26" ry="10"/><ellipse cx="88" cy="44" rx="16" ry="10"/><ellipse cx="290" cy="70" rx="22" ry="8"/></g>
