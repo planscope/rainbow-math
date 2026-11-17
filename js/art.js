@@ -1,6 +1,6 @@
 // Original artwork, drawn as inline SVG: Lumi the rainbow dragon, the island
 // friends, the island itself and the interface icons.
-import { critterOf } from './critters.js?v=26';
+import { critterOf } from './critters.js?v=27';
 
 const INK = '#2b2140';
 export const RAINBOW = ['#ff6b6b', '#ffa94d', '#ffd43b', '#69db7c', '#4dabf7', '#748ffc', '#da77f2'];

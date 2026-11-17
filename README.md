@@ -16,6 +16,7 @@ and subtraction by seeing and moving tens and ones. English and Spanish.
 | `js/app.js` | Screens: welcome, choose adventure, problems, help, break, celebration, island, grown-ups. |
 | `js/i18n.js` | Every word in English and Spanish, short stories, island friends. |
 | `js/art.js` | Original artwork drawn as SVG: Lumi the rainbow dragon, 12 friends (and their baby versions), the island, icons. |
+| `js/spell.js` | Spelling words from school: the weekly lists (parts, tricky letters, tips, sentences), the 4 steps per word, checking. |
 | `js/critters.js` | Island friends that never run out, treats, feeding and hearts, what friends see on a visit. |
 | `js/islands.js` | Visiting friends' islands in other houses (through the family's Google Sheet). |
 | `js/sync.js`, `js/merge.js` | Progress saved to the family's Google Sheet and put together across devices. |
@@ -70,6 +71,21 @@ The page is unlisted, not private: anyone with the link can open it.
   finished adventure brings a new friend to the island: the 12 named friends first,
   then baby friends forever (each with its own color, hat or bow, and name).
   Nothing is ever taken away.
+
+## Spelling words
+
+- "Spelling words" on the home screen (big kids). Each week's school list lives in
+  `WEEKS` in `js/spell.js` with its parts, tricky letters, a tip (English and Spanish)
+  and a sentence. Add the new week there, then `node tools/eleven.mjs generate house`
+  records each word, its sentence and the word spelled out.
+- Each word climbs: learn (see its parts, hear it, trace it with a finger) → build it
+  from letter tiles → fill in the tricky letters → write it from memory. A miss moves
+  it one step back. Practice picks the words furthest from known.
+- Practice test: hear each word and its sentence, type it; no checking until the end,
+  like the real test. Paper test: the app reads, she writes on paper, then checks it
+  with a grown-up. Missed words go back to practice.
+- Grown-ups see each word's step and every practice test, and can type their own list
+  (the device voice reads typed words).
 
 ## Island friends and visits
 

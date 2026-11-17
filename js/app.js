@@ -1,18 +1,19 @@
 // Mila's Rainbow Math Adventure: screens and interaction.
-import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL, mistakePattern } from './math.js?v=26';
-import * as M from './model.js?v=26';
-import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=26';
-import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL, QUIZ, passLevel, failQuiz, quizPlan, worldOf, WORLD_COUNT, migratePath } from './levels.js?v=26';
-import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=26';
-import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=26';
-import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults, loadPlayers, savePlayers, addPlayer, removePlayer, pinHash, helpLevel, recordFade, passedFade, onSaved, readData, writeData, dropData } from './store.js?v=26';
-import { createSync, showCode, readCode, newCode } from './sync.js?v=26';
-import { critterName, critterNick, critterOf, cleanSnap, FOODS, FOOD_KEYS, WAVES, care as careOf, hearts as heartsOf, isFull, treats as treatCount, feed, pet, lineup, nextFriend, takeGifts, sentToday, noteSent, GIFTS_A_DAY } from './critters.js?v=26';
-import { createIslands } from './islands.js?v=26';
-import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking as stopDeviceSpeech, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=26';
-import { playLine, playExplain, playSequence, playParts, stopClips, preloadLines, unlockMedia, voiceInfo, voiceNames } from './voice.js?v=26';
-import { lineText, explainFor, readSequence, clipId } from './voicelines.js?v=26';
-import { LITTLE_LEVELS, LITTLE_WORLDS, LITTLE_SKILLS, littleWorldOf, makeLittle, pickLittle, OBJ_EMOJI, migrateLittle } from './little.js?v=26';
+import { generateProblem, analyzeAnswer, buildSteps, parseEntry, tensOf, onesOf, isValidProblem, BASE_SKILL, mistakePattern } from './math.js?v=27';
+import * as M from './model.js?v=27';
+import { generateMul, isValidMul, buildMulSteps, analyzeMul } from './mult.js?v=27';
+import { LEVELS, levelInfo, pickFromLevel, recordPath, MAX_PATH_LEVEL, QUIZ, passLevel, failQuiz, quizPlan, worldOf, WORLD_COUNT, migratePath } from './levels.js?v=27';
+import { t, STR, storyText, CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=27';
+import { lumiSVG, friendSVG, islandSVG, icon, pieceSVG, RAINBOW } from './art.js?v=27';
+import { load, save, storageOK, pickSkill, recordResult, regroupAvailable, defaults, loadPlayers, savePlayers, addPlayer, removePlayer, pinHash, helpLevel, recordFade, passedFade, onSaved, readData, writeData, dropData } from './store.js?v=27';
+import { createSync, showCode, readCode, newCode } from './sync.js?v=27';
+import { critterName, critterNick, critterOf, cleanSnap, FOODS, FOOD_KEYS, WAVES, care as careOf, hearts as heartsOf, isFull, treats as treatCount, feed, pet, lineup, nextFriend, takeGifts, sentToday, noteSent, GIFTS_A_DAY } from './critters.js?v=27';
+import { createIslands } from './islands.js?v=27';
+import { currentList, infoFor, cleanWord, plan, tiles, holes, check, record, wordStat, stars, knownCount, testOrder, slug, wordClip, sentenceClip, spellClips, spelledText, STEPS, KNOWN } from './spell.js?v=27';
+import { sfx, setSound, unlockAudio, speak as speakRaw, stopSpeaking as stopDeviceSpeech, canSpeak, listVoices, onVoicesChanged } from './audio.js?v=27';
+import { playLine, playExplain, playSequence, playParts, stopClips, preloadLines, unlockMedia, voiceInfo, voiceNames } from './voice.js?v=27';
+import { lineText, explainFor, readSequence, clipId } from './voicelines.js?v=27';
+import { LITTLE_LEVELS, LITTLE_WORLDS, LITTLE_SKILLS, littleWorldOf, makeLittle, pickLittle, OBJ_EMOJI, migrateLittle } from './little.js?v=27';
 const stopSpeaking = () => { stopDeviceSpeech(); stopClips(); };
 
 // ---------------------------------------------------------------- setup
@@ -173,6 +174,10 @@ function render() {
     case 'celebrate': view = viewCelebrate(); break;
     case 'island': view = viewIsland(); break;
     case 'critter': view = viewCritter(); break;
+    case 'spell': view = viewSpell(); break;
+    case 'spellplay': view = viewSpellPlay(); break;
+    case 'spellmark': view = viewSpellMark(); break;
+    case 'spelldone': view = viewSpellDone(); break;
     case 'visits': view = viewVisits(); break;
     case 'visit': view = visit ? viewVisit() : viewVisits(); break;
     case 'path': view = viewPathMap(); break;
@@ -198,6 +203,7 @@ function render() {
     if (el && !el.disabled) el.focus({ preventScroll: true });
   }
   if (screen === 'play' && play) setupInk();
+  if (screen === 'spellplay' && spl && spl.kind === 'learn') setupTrace();
   if (play) play.fresh = new Map();
   if (coach.length) {
     positionCoach();
@@ -522,7 +528,8 @@ function viewWelcome() {
         ? button(T('keepGoing', { n: Math.min(s.index + 1, s.length), total: s.length }), resumeSession, { cls: 'primary big', ic: 'next', k: 'go' })
         : button(T('letsGo'), startFlow, { cls: 'primary big', ic: 'next', k: 'go' }),
       s ? button(T('newAdventure'), () => { data.active = null; play = null; save(data); startFlow(); }, { cls: 'big', k: 'new' }) : null,
-      button(T('myIsland'), () => go('island'), { cls: 'big', ic: 'island', k: 'island' })),
+      button(T('myIsland'), () => go('island'), { cls: 'big', ic: 'island', k: 'island' }),
+      isLittle() ? null : button(`\u270F\uFE0F ${T('sp_title')}`, openSpelling, { cls: 'big', k: 'spelling' })),
     h('div', { class: 'rm-foot' },
       button(T('switchPlayer'), switchPlayer, { cls: 'soft small', ic: 'back', k: 'switch' }),
       parentHold()));
@@ -2924,7 +2931,7 @@ function setupInk() {
   cv.addEventListener('pointerup', end);
   cv.addEventListener('pointercancel', end);
 }
-window.addEventListener('resize', () => { if (screen === 'play' && play) { setupInk(); positionCoach(); } });
+window.addEventListener('resize', () => { if (screen === 'play' && play) { setupInk(); positionCoach(); } if (screen === 'spellplay' && spl && spl.kind === 'learn') update(); });
 
 function guidedWait() {
   toast(T('g_wait'));
@@ -3767,6 +3774,561 @@ function removeFriendIsland(code) {
   update();
 }
 
+// ---------------------------------------------------------------- spelling words
+// This week's words from school: learn each one so it makes sense (parts, tricky
+// letters, a sentence), trace it, build it, fill the tricky part, then write it from
+// memory. Practice tests are like Friday's: typed here, or on paper with the app reading.
+let spl = null; // the spelling exercise on screen
+const spList = () => currentList(data.spelling);
+const spInfo = (w) => spList().words.find((x) => x.w === w) || infoFor(w);
+
+// Voice: recorded clips when there are, the device voice otherwise (English: these are English words).
+function sayClips(ids, fallback) {
+  stopSpeaking();
+  // the words are always read (even with game sounds off): she can't spell what she can't hear
+  playSequence(ids).then((ok) => { if (!ok) speak(fallback, 'en'); });
+}
+const sayWord = (info) => sayClips([wordClip(info.w)], info.w);
+const saySentence = (info) => (info.s ? sayClips([sentenceClip(info.w)], `${info.w}. ${info.s} ${info.w}.`) : sayClips([wordClip(info.w), wordClip(info.w)], `${info.w}. ${info.w}.`));
+const spellOut = (info) => sayClips(spellClips(info), spelledText(info.w));
+
+function openSpelling() {
+  spl = null;
+  go('spell');
+  sayLine('sp_hello');
+}
+
+function starRow(n) {
+  return h('span', { class: 'rm-sp-stars', role: 'img', 'aria-label': T('sp_starsAria', { n }) },
+    [0, 1, 2].map((i) => h('span', { class: i < n ? 'on' : '' }, '★')));
+}
+
+function viewSpell() {
+  const list = spList();
+  const sp = data.spelling;
+  const k = knownCount(sp, list);
+  const last = (sp.tests || []).find((x) => x.week === list.id);
+  return h('main', { class: 'rm-screen rm-spell' },
+    h('div', { class: 'rm-row-top' },
+      button(T('back'), () => go('welcome'), { cls: 'soft small', ic: 'back', k: 'back' }),
+      langButton()),
+    h('h2', { class: 'rm-h2' }, `✏️ ${T('sp_title')}`),
+    h('p', { class: 'rm-text rm-center' }, list.label[L()] || list.label.en),
+    h('div', { class: 'rm-sp-meter', role: 'img', 'aria-label': T('sp_known', { k, n: list.words.length }) },
+      list.words.map((x, i) => h('span', { class: wordStat(sp, x.w).step >= KNOWN ? 'on' : '', style: `--c:${RAINBOW[i % 7]}` }))),
+    h('p', { class: 'rm-text rm-center' }, T('sp_known', { k, n: list.words.length }) + (last ? ` · ${T('sp_lastTest', { k: last.k, n: last.n })}` : '')),
+    h('div', { class: 'rm-sp-words' }, list.words.map((x) => h('button', {
+      type: 'button', class: 'rm-sp-word', 'data-k': `sw-${slug(x.w)}`, onclick: () => startSpell('one', x.w),
+    }, h('b', null, x.w), starRow(stars(wordStat(sp, x.w)))))),
+    h('div', { class: 'rm-actions' },
+      button(T('sp_practice'), () => startSpell('practice'), { cls: 'primary big', ic: 'next', k: 'sp-practice' }),
+      button(T('sp_test'), () => startSpell('test'), { cls: 'big', ic: 'star', k: 'sp-test' }),
+      button(T('sp_paper'), () => startSpell('paper'), { cls: 'big', k: 'sp-paper' })),
+    h('p', { class: 'rm-text rm-center' }, T('sp_howto')));
+}
+
+// mode: 'practice' (the plan), 'one' (learn one word), 'test' (typed), 'paper' (she writes on paper)
+function startSpell(mode, word = null) {
+  const list = spList();
+  let items;
+  if (mode === 'one') items = [{ w: word, kind: 'learn' }];
+  else if (mode === 'practice') items = plan(data.spelling, list, 8);
+  else items = testOrder(list).map((w) => ({ w, kind: mode === 'paper' ? 'paper' : 'test' }));
+  spl = { mode, items, i: 0, results: [], earned: 0, phase: 'go', marks: {} };
+  loadItem();
+  go('spellplay');
+  speakItem();
+}
+
+function loadItem() {
+  const it = spl.items[spl.i];
+  const info = spInfo(it.w);
+  Object.assign(spl, {
+    w: it.w, kind: it.kind, info,
+    typed: '', caps: false, misses: 0, solved: false, check: null, retype: false,
+    strokes: [], traced: false,
+    tiles: it.kind === 'build' ? tiles(info.w) : [], used: [],
+    holes: it.kind === 'fill' ? holes(info) : [], filled: {}, holeMiss: {},
+  });
+}
+
+function speakItem() {
+  const { kind, info } = spl;
+  if (kind === 'learn') { saySentence(info); return; }
+  if (kind === 'paper') { saySentence(info); return; }
+  // build / fill / spell / test: hear the word (and the sentence for writing from memory)
+  if (kind === 'spell' || kind === 'test') saySentence(info);
+  else sayWord(info);
+}
+
+function nextItem() {
+  spl.i += 1;
+  if (spl.i >= spl.items.length) { finishSpell(); return; }
+  loadItem();
+  update();
+  try { root.scrollTop = 0; } catch (e) { /* ignore */ }
+  speakItem();
+}
+
+// She got one right (or finished learning it): count it, rainbow piece for real practice.
+function scoreItem(ok) {
+  const kind = spl.kind === 'paper' ? 'test' : spl.kind;
+  record(data.spelling, spl.w, ok, kind);
+  if (kind !== 'learn') {
+    spl.results.push({ w: spl.w, kind, ok });
+    if (ok) { data.rewards.pieces++; spl.earned++; }
+  }
+  save(data);
+}
+
+function finishSpell() {
+  const list = spList();
+  const isTest = spl.mode === 'test' || spl.mode === 'paper';
+  let friend = null;
+  if (isTest) {
+    const k = spl.results.filter((r) => r.ok).length;
+    const n = spl.results.length;
+    data.spelling.tests = [{ date: new Date().toISOString(), mode: spl.mode, week: list.id, n, k, missed: spl.results.filter((r) => !r.ok).map((r) => r.w) }, ...(data.spelling.tests || [])].slice(0, 30);
+    if (n && k === n) { data.rewards.pieces += 3; spl.earned += 3; }
+  }
+  if (spl.mode !== 'one') {
+    // a finished spelling adventure brings a new island friend too
+    friend = nextFriend(data.rewards.friends);
+    if (friend) data.rewards.friends = [...data.rewards.friends, friend];
+    if (CREATURE_ORDER.every((f) => data.rewards.friends.includes(f))) data.rewards.star = true;
+  }
+  spl.friend = friend;
+  spl.phase = 'done';
+  save(data);
+  if (spl.mode === 'one') { go('spell'); return; }
+  sfx.reward();
+  go('spelldone');
+  sayLine(isTest && spl.results.every((r) => r.ok) ? 'sp_test_all' : 'sp_done');
+}
+
+// ---------------------------------------------------------------- one exercise
+function viewSpellPlay() {
+  if (!spl) return viewSpell();
+  const { kind, info } = spl;
+  const n = spl.items.length;
+  const top = h('div', { class: 'rm-row-top' },
+    button(T('sp_stop'), () => { spl = null; go('spell'); }, { cls: 'soft small', ic: 'back', k: 'back' }),
+    h('span', { class: 'rm-sp-count' }, T('sp_count', { i: spl.i + 1, n })),
+    langButton());
+  const hear = h('div', { class: 'rm-sp-hear' },
+    button(T('sp_hearWord'), () => sayWord(info), { cls: 'soft', ic: 'read', k: 'sp-hear' }),
+    button(T('sp_hearSentence'), () => saySentence(info), { cls: 'soft', ic: 'read', k: 'sp-sentence' }));
+  let body;
+  if (kind === 'learn') body = learnBody(info);
+  else if (kind === 'build') body = buildBody(info);
+  else if (kind === 'fill') body = fillBody(info);
+  else if (kind === 'paper') body = paperBody(info);
+  else body = spellBody(info);
+  return h('main', { class: `rm-screen rm-spell rm-sp-${kind}` }, top,
+    h('h2', { class: 'rm-h2' }, T(`sp_k_${kind}`)),
+    kind === 'learn' || kind === 'paper' ? null : hear,
+    body);
+}
+
+// The word in parts, with the tricky letters lit up (one highlight per run of letters).
+function partsEl(info, big = true) {
+  const tr = info.tricky ? info.w.indexOf(info.tricky) : -1;
+  const isTricky = (i) => tr >= 0 && i >= tr && i < tr + info.tricky.length;
+  let at = 0;
+  return h('div', { class: `rm-sp-parts ${big ? 'big' : ''}`, 'aria-label': info.w },
+    info.parts.map((p, pi) => {
+      const runs = [];
+      for (const c of p) {
+        const t = isTricky(at++);
+        if (runs.length && runs[runs.length - 1].t === t) runs[runs.length - 1].s += c; else runs.push({ t, s: c });
+      }
+      return h('span', { class: `rm-sp-part p${pi % 4}` }, runs.map((r) => (r.t ? h('mark', { class: 'tricky' }, r.s) : r.s)));
+    }));
+}
+
+function sentenceEl(info) {
+  if (!info.s) return null;
+  const bits = info.s.split(new RegExp(`(${info.w})`, 'i'));
+  return h('p', { class: 'rm-sp-sentence' }, bits.map((b) => (b.toLowerCase() === info.w.toLowerCase() ? h('b', null, b) : b)));
+}
+
+function learnBody(info) {
+  return [
+    h('section', { class: 'rm-card rm-sp-card' },
+      partsEl(info),
+      h('p', { class: 'rm-small rm-center' }, info.parts.length > 1 ? info.parts.join(' + ') : ''),
+      info.tip ? h('p', { class: 'rm-sp-tip' }, `\u{1F4A1} ${info.tip[L()] || info.tip.en}`) : null,
+      sentenceEl(info),
+      h('div', { class: 'rm-sp-hear' },
+        button(T('sp_hearSentence'), () => saySentence(info), { cls: 'soft', ic: 'read', k: 'sp-sentence' }),
+        button(T('sp_spellOut'), () => spellOut(info), { cls: 'soft', k: 'sp-spellout' }))),
+    h('p', { class: 'rm-text rm-center' }, T('sp_traceNow')),
+    traceEl(info),
+    h('div', { class: 'rm-actions' },
+      button(T('sp_clear'), () => { spl.strokes = []; spl.traced = false; update(); }, { cls: 'soft small', k: 'sp-clear' }),
+      button(T('next'), () => { sfx.pop(); scoreItem(true); nextItem(); }, { cls: `primary big ${spl.traced ? 'glow' : ''}`, ic: 'next', k: 'sp-next' })),
+  ];
+}
+
+// Dotted letters on handwriting lines; she traces them with a finger or a pencil.
+// Long words go on two lines, split between their parts, so the letters stay big.
+function traceRows(info) {
+  const w = info.w;
+  if (w.length <= 9 || info.parts.length < 2) return [w];
+  let best = null;
+  for (let k = 1; k < info.parts.length; k++) {
+    const a = info.parts.slice(0, k).join('');
+    const b = info.parts.slice(k).join('');
+    if (!best || Math.max(a.length, b.length) < Math.max(best[0].length, best[1].length)) best = [a, b];
+  }
+  return best;
+}
+function traceEl(info) {
+  const rows = traceRows(info);
+  const longest = Math.max(...rows.map((r) => r.length));
+  const width = Math.max(340, longest * 62 + 70);
+  const height = 150 * rows.length;
+  const row = (text, i) => {
+    const y = i * 150;
+    return `<line x1="8" y1="${y + 34}" x2="${width - 8}" y2="${y + 34}" stroke="#c9b8ff" stroke-width="2"/>
+    <line x1="8" y1="${y + 62}" x2="${width - 8}" y2="${y + 62}" stroke="#ffb3e1" stroke-width="2" stroke-dasharray="8 8"/>
+    <line x1="8" y1="${y + 110}" x2="${width - 8}" y2="${y + 110}" stroke="#8b5cff" stroke-width="3"/>
+    <text x="${width / 2}" y="${y + 110}" text-anchor="middle" font-family="Andika, sans-serif" font-size="100" fill="none" stroke="#a48cff" stroke-width="2.4" stroke-dasharray="3 6" stroke-linecap="round" letter-spacing="2">${text}${i < rows.length - 1 ? '-' : ''}</text>`;
+  };
+  const svg = `<svg viewBox="0 0 ${width} ${height}" class="rm-sp-trace-svg" aria-hidden="true" preserveAspectRatio="xMidYMid meet">${rows.map(row).join('')}</svg>`;
+  return h('div', { class: 'rm-sp-trace', style: `aspect-ratio: ${width} / ${height}` },
+    h('div', { class: 'rm-sp-trace-guide', html: svg }),
+    h('canvas', { class: 'rm-sp-ink', 'aria-label': T('sp_traceNow') }));
+}
+
+function setupTrace() {
+  const cv = root.querySelector('.rm-sp-ink');
+  if (!cv || !spl) return;
+  const r = cv.parentElement.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  cv.width = Math.max(1, Math.round(r.width * dpr));
+  cv.height = Math.max(1, Math.round(r.height * dpr));
+  const ctx = cv.getContext('2d');
+  if (!ctx) return;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = '#ff4fa8';
+  ctx.fillStyle = '#ff4fa8';
+  // strokes are kept as fractions of the box, so they survive a resize
+  const toPx = (st) => ({ pts: st.pts.map(([x, y, w]) => [x * r.width, y * r.height, w]) });
+  spl.strokes.forEach((st) => drawStroke(ctx, toPx(st)));
+  let cur = null, pid = null;
+  const at = (e) => { const b = cv.getBoundingClientRect(); return [(e.clientX - b.left) / b.width, (e.clientY - b.top) / b.height, e.pointerType === 'pen' ? 3 + (e.pressure || 0.5) * 5 : 7]; };
+  cv.addEventListener('pointerdown', (e) => {
+    if (!spl || cur) return;
+    e.preventDefault();
+    pid = e.pointerId;
+    try { cv.setPointerCapture(pid); } catch (err) { /* ignore */ }
+    cur = { pts: [at(e)] };
+    spl.strokes.push(cur);
+    drawStroke(ctx, toPx(cur));
+  });
+  cv.addEventListener('pointermove', (e) => {
+    if (!cur || e.pointerId !== pid) return;
+    e.preventDefault();
+    const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+    for (const ev of (evs.length ? evs : [e])) { cur.pts.push(at(ev)); drawStroke(ctx, toPx({ pts: cur.pts.slice(-2) })); }
+  });
+  const end = (e) => {
+    if (!cur || e.pointerId !== pid) return;
+    cur = null;
+    pid = null;
+    const ink = spl.strokes.reduce((t, st) => t + st.pts.length, 0);
+    if (!spl.traced && ink > 25 + spl.w.length * 6) {
+      spl.traced = true;
+      const nb = root.querySelector('[data-k="sp-next"]');
+      if (nb) nb.classList.add('glow');
+      sfx.correct();
+    }
+  };
+  cv.addEventListener('pointerup', end);
+  cv.addEventListener('pointercancel', end);
+}
+
+// Where each part of the word starts (a little space there helps her see the parts).
+function partStarts(info) {
+  const out = new Set();
+  let at = 0;
+  info.parts.forEach((p, i) => { if (i) out.add(at); at += p.length; });
+  return out;
+}
+
+// Build: tap her word's letters in order.
+function buildBody(info) {
+  const next = info.w[spl.used.length];
+  return [
+    h('div', { class: 'rm-sp-slots', 'aria-label': T('sp_k_build') },
+      [...info.w].map((c, i) => h('span', { class: `rm-sp-slot ${i < spl.used.length ? 'on' : ''} ${i === spl.used.length && !spl.solved ? 'now' : ''} ${partStarts(info).has(i) ? 'gap' : ''}` }, i < spl.used.length ? c : ''))),
+    spl.solved ? solvedEl(info) : h('div', { class: 'rm-sp-tiles' }, spl.tiles.map((t) => h('button', {
+      type: 'button', class: 'rm-sp-tile', 'data-k': `tile-${t.id}`, disabled: spl.used.includes(t.id),
+      onclick: (e) => {
+        if (spl.solved || spl.used.includes(t.id)) return;
+        if (t.c.toLowerCase() === next.toLowerCase()) {
+          spl.used.push(t.id);
+          sfx.tap();
+          if (spl.used.length === info.w.length) spSolve(spl.misses === 0);
+          else update();
+        } else {
+          spl.misses++;
+          sfx.soft();
+          shake(e.currentTarget);
+          if (spl.misses % 3 === 0) { toast(T('sp_hintNext', { c: next })); }
+        }
+      },
+    }, t.c))),
+  ];
+}
+
+// Fill: write the missing letters (the tricky part).
+function fillBody(info) {
+  const cur = spl.holes.find((i) => spl.filled[i] == null);
+  return [
+    h('div', { class: 'rm-sp-slots fill' }, [...info.w].map((c, i) => {
+      const hole = spl.holes.includes(i);
+      const shown = !hole ? c : spl.filled[i];
+      return h('span', { class: `rm-sp-slot ${partStarts(info).has(i) ? 'gap' : ''} ${hole ? 'hole' : 'given'} ${hole && shown != null ? 'on' : ''} ${i === cur && !spl.solved ? 'now' : ''} ${spl.holeMiss[i] >= 2 ? 'told' : ''}` }, shown == null ? '' : shown);
+    })),
+    info.tip ? h('p', { class: 'rm-sp-tip small' }, `\u{1F4A1} ${info.tip[L()] || info.tip.en}`) : null,
+    spl.solved ? solvedEl(info) : keyboardEl(),
+  ];
+}
+
+// Spell (and test): hear it, write it from memory.
+function spellBody(info) {
+  const shown = spl.typed;
+  return [
+    h('div', { class: `rm-sp-answer ${spl.check && !spl.check.ok ? 'miss' : ''}`, 'aria-live': 'polite' },
+      shown ? h('span', null, shown) : h('span', { class: 'rm-sp-ph' }, T('sp_typeHere')),
+      h('span', { class: 'rm-sp-caret' })),
+    spl.check && !spl.check.ok ? h('section', { class: 'rm-card rm-sp-fix' },
+      h('p', { class: 'rm-lead' }, T('sp_almost')),
+      h('div', { class: 'rm-sp-diff' }, spl.check.diff.map((d) => h('span', { class: d.ok ? 'ok' : 'fix' }, d.c))),
+      partsEl(info, false),
+      info.tip ? h('p', { class: 'rm-sp-tip small' }, `\u{1F4A1} ${info.tip[L()] || info.tip.en}`) : null,
+      h('p', { class: 'rm-small' }, T('sp_copyIt'))) : null,
+    spl.solved ? solvedEl(info) : [keyboardEl(), h('div', { class: 'rm-actions' },
+      button(T('sp_check'), checkTyped, { cls: 'primary big', ic: 'next', k: 'sp-check', disabled: !spl.typed }))],
+  ];
+}
+
+// Paper test: the app reads, she writes on her own paper. Checking comes at the end.
+function paperBody(info) {
+  return [
+    h('div', { class: 'rm-sp-paper-n' }, String(spl.i + 1)),
+    h('p', { class: 'rm-big-text rm-center' }, T('sp_paperWrite', { n: spl.i + 1 })),
+    h('div', { class: 'rm-sp-hear' },
+      button(T('sp_hearAgain'), () => saySentence(info), { cls: 'soft big', ic: 'read', k: 'sp-sentence' })),
+    h('div', { class: 'rm-actions' },
+      button(spl.i + 1 < spl.items.length ? T('sp_paperNext') : T('sp_paperCheck'), () => {
+        if (spl.i + 1 < spl.items.length) { spl.i += 1; loadItem(); update(); speakItem(); } else { spl.phase = 'mark'; go('spellmark'); sayLine('sp_paper_check'); }
+      }, { cls: 'primary big', ic: 'next', k: 'sp-next' })),
+  ];
+}
+
+function viewSpellMark() {
+  if (!spl) return viewSpell();
+  const done = spl.items.every((it) => spl.marks[it.w] != null);
+  return h('main', { class: 'rm-screen rm-spell' },
+    h('div', { class: 'rm-row-top' },
+      button(T('sp_stop'), () => { spl = null; go('spell'); }, { cls: 'soft small', ic: 'back', k: 'back' }),
+      langButton()),
+    h('h2', { class: 'rm-h2' }, T('sp_markTitle')),
+    h('p', { class: 'rm-text rm-center' }, T('sp_markText')),
+    h('ol', { class: 'rm-sp-marks' }, spl.items.map((it, n) => h('li', null,
+      h('b', { class: 'rm-sp-mark-n' }, `${n + 1}.`),
+      partsEl(spInfo(it.w), false),
+      h('span', { class: 'rm-sp-mark-btns' },
+        h('button', { type: 'button', class: 'rm-sp-mark ok', 'aria-pressed': String(spl.marks[it.w] === true), 'aria-label': T('sp_markOk', { w: it.w }), 'data-k': `mk-ok-${slug(it.w)}`, onclick: () => { spl.marks[it.w] = true; sfx.tap(); update(); } }, '✔'),
+        h('button', { type: 'button', class: 'rm-sp-mark no', 'aria-pressed': String(spl.marks[it.w] === false), 'aria-label': T('sp_markNo', { w: it.w }), 'data-k': `mk-no-${slug(it.w)}`, onclick: () => { spl.marks[it.w] = false; sfx.tap(); update(); } }, '✖'))))),
+    h('div', { class: 'rm-actions' },
+      button(T('sp_markDone'), () => {
+        for (const it of spl.items) { spl.w = it.w; spl.kind = 'paper'; scoreItem(!!spl.marks[it.w]); }
+        finishSpell();
+      }, { cls: 'primary big', ic: 'next', k: 'sp-mark-done', disabled: !done })));
+}
+
+function solvedEl(info) {
+  return h('div', { class: 'rm-sp-solved' },
+    h('div', { class: 'rm-lumi', html: lumiSVG('cheer') }),
+    h('p', { class: 'rm-big-text' }, spl.check && spl.check.capital ? T('sp_rightCapital', { w: info.w }) : T('sp_right')),
+    sentenceEl(info),
+    h('div', { class: 'rm-actions' },
+      button(T('next'), nextItem, { cls: 'primary big', ic: 'next', k: 'sp-next' })));
+}
+
+function spSolve(ok) {
+  spl.solved = true;
+  if (!spl.retype) scoreItem(ok); // a miss was already counted before she copied it
+  sfx.correct();
+  sayLine(ok ? 'sp_right' : 'sp_right_after');
+  update();
+}
+
+function shake(el) {
+  if (!el || reduced()) return;
+  el.classList.remove('rm-shake');
+  void el.offsetWidth;
+  el.classList.add('rm-shake');
+}
+
+// A big, kind keyboard (no autocorrect), with one key for a capital letter.
+const KEY_ROWS = ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'];
+function keyboardEl() {
+  return h('div', { class: 'rm-sp-keys', role: 'group', 'aria-label': T('sp_keyboard') },
+    KEY_ROWS.map((row, ri) => h('div', { class: 'rm-sp-krow' },
+      ri === 2 ? h('button', { type: 'button', class: `rm-sp-key wide ${spl.caps ? 'on' : ''}`, 'aria-pressed': String(spl.caps), 'aria-label': T('sp_capital'), 'data-k': 'key-caps', onclick: () => { spl.caps = !spl.caps; sfx.tap(); update(); } }, '⇧') : null,
+      [...row].map((c) => h('button', { type: 'button', class: 'rm-sp-key', 'data-k': `key-${c}`, onclick: (e) => typeLetter(c, e.currentTarget) }, spl.caps ? c.toUpperCase() : c)),
+      ri === 2 ? h('button', { type: 'button', class: 'rm-sp-key wide', 'aria-label': T('sp_erase'), 'data-k': 'key-del', onclick: eraseLetter }, '⌫') : null)));
+}
+
+function typeLetter(c, el = null) {
+  if (!spl || spl.solved) return;
+  const ch = spl.caps ? c.toUpperCase() : c;
+  spl.caps = false;
+  if (spl.kind === 'fill') {
+    const at = spl.holes.find((i) => spl.filled[i] == null);
+    if (at == null) return;
+    const want = spl.info.w[at];
+    if (ch === want || ch.toLowerCase() === want.toLowerCase()) {
+      spl.filled[at] = want;
+      sfx.tap();
+      if (spl.holes.every((i) => spl.filled[i] != null)) { spSolve(spl.misses === 0); return; }
+    } else {
+      spl.misses++;
+      spl.holeMiss[at] = (spl.holeMiss[at] || 0) + 1;
+      sfx.soft();
+      shake(el);
+      if (spl.holeMiss[at] >= 2) { spl.filled[at] = want; toast(T('sp_itsThis', { c: want })); if (spl.holes.every((i) => spl.filled[i] != null)) { spSolve(false); return; } }
+    }
+    update();
+    return;
+  }
+  if (spl.kind === 'spell' || spl.kind === 'test') {
+    if (spl.typed.length >= 24) return;
+    spl.typed += ch;
+    sfx.tap();
+    update();
+  }
+}
+function eraseLetter() {
+  if (!spl || spl.solved) return;
+  if (spl.kind === 'spell' || spl.kind === 'test') { spl.typed = spl.typed.slice(0, -1); sfx.tap(); update(); }
+}
+
+function checkTyped() {
+  if (!spl || spl.solved || !spl.typed) return;
+  const c = check(spl.info.w, spl.typed);
+  if (c.ok && spl.kind === 'test') { scoreItem(true); sfx.tap(); nextItem(); return; }
+  if (c.ok) {
+    spl.check = c;
+    // after a miss she copies it right once more: that counts as practice, not as a first try
+    spSolve(!spl.retype);
+    return;
+  }
+  if (spl.kind === 'test') {
+    // like the real test: no checking until the end (a missed word goes back to practice)
+    scoreItem(false);
+    sfx.tap();
+    nextItem();
+    return;
+  }
+  if (!spl.retype) { record(data.spelling, spl.w, false, 'spell'); spl.results.push({ w: spl.w, kind: 'spell', ok: false }); save(data); }
+  spl.check = c;
+  spl.retype = true;
+  spl.typed = '';
+  sfx.soft();
+  sayLine('sp_almost');
+  update();
+}
+
+function viewSpellDone() {
+  const s = spl || { results: [], earned: 0 };
+  const isTest = s.mode === 'test' || s.mode === 'paper';
+  const k = s.results.filter((r) => r.ok).length;
+  const n = s.results.length;
+  const missed = [...new Set(s.results.filter((r) => !r.ok).map((r) => r.w))];
+  const conf = !reduced() && (!isTest || k === n) ? h('div', { class: 'rm-confetti', 'aria-hidden': 'true' },
+    Array.from({ length: 24 }, (_, i) => h('span', { style: `--i:${i};--x:${(i * 37) % 100}` }))) : null;
+  return h('main', { class: 'rm-screen rm-celebrate rm-spell' },
+    conf,
+    h('div', { class: 'rm-lumi big', html: lumiSVG('cheer') }),
+    h('h2', { class: 'rm-h2' }, isTest ? T('sp_testScore', { k, n }) : T('sp_doneTitle')),
+    h('p', { class: 'rm-big-text' }, isTest ? (k === n ? T('sp_testAll') : T('sp_testSome')) : T('sp_doneText', { n: s.earned })),
+    missed.length ? h('section', { class: 'rm-card rm-sp-missed' },
+      h('p', { class: 'rm-lead' }, T('sp_practiceThese')),
+      h('div', { class: 'rm-sp-words' }, missed.map((w) => h('button', { type: 'button', class: 'rm-sp-word', onclick: () => startSpell('one', w) }, h('b', null, w))))) : null,
+    s.friend ? h('button', { type: 'button', class: 'rm-friend-card photocard new rm-friend-btn', onclick: () => openCare(s.friend) },
+      h('div', { class: 'rm-friend-art', html: friendSVG(s.friend) }),
+      h('div', null, h('p', { class: 'rm-text' }, critterOf(s.friend).baby ? T('celHatch') : T('celFriend')), h('p', { class: 'rm-friend-name' }, critterName(s.friend, L())))) : null,
+    h('div', { class: 'rm-actions' },
+      button(T('sp_again'), () => startSpell(isTest ? s.mode : 'practice'), { cls: 'primary big', ic: 'next', k: 'sp-again' }),
+      button(T('sp_title'), () => go('spell'), { cls: 'big', k: 'sp-home' }),
+      button(T('seeIsland'), () => go('island'), { cls: 'big', ic: 'island', k: 'island' })));
+}
+
+// keyboard on a computer or an iPad with a keyboard
+function spellKey(e) {
+  if (screen !== 'spellplay' || !spl || e.metaKey || e.ctrlKey || e.altKey) return false;
+  if (/^[a-zA-Z]$/.test(e.key)) { e.preventDefault(); spl.caps = e.key !== e.key.toLowerCase(); typeLetter(e.key.toLowerCase()); return true; }
+  if (e.key === 'Backspace') { e.preventDefault(); eraseLetter(); return true; }
+  if (e.key === 'Enter') {
+    if (e.target && e.target.tagName === 'BUTTON' && root.contains(e.target)) return true;
+    e.preventDefault();
+    if (spl.solved) nextItem(); else if (spl.kind === 'spell' || spl.kind === 'test') checkTyped();
+    return true;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------- grown-ups: this week's words
+let spellDraft = null; // { label, text }
+function spellCard() {
+  if (!player || isLittle()) return null;
+  const sp = data.spelling;
+  const list = spList();
+  const tests = (sp.tests || []).filter((x) => x.week === list.id).slice(0, 5);
+  const fmt = (iso) => { try { return new Date(iso).toLocaleDateString(L() === 'es' ? 'es-MX' : 'en-US', { weekday: 'short', month: 'short', day: 'numeric' }); } catch (e) { return iso.slice(0, 10); } };
+  return h('section', { class: 'rm-card rm-p-sec rm-sp-p' },
+    h('h3', { class: 'rm-h3' }, `✏️ ${T('p_spTitle')}`),
+    h('p', { class: 'rm-small' }, `${list.label[L()] || list.label.en}${list.custom ? ` · ${T('p_spTyped')}` : ''}`),
+    h('div', { class: 'rm-table-wrap' }, h('table', { class: 'rm-table' },
+      h('thead', null, h('tr', null, [T('p_spWord'), T('p_spStep'), T('p_spRight'), T('p_spMiss')].map((x) => h('th', { scope: 'col' }, x)))),
+      h('tbody', null, list.words.map((x) => {
+        const st = wordStat(sp, x.w);
+        return h('tr', null, h('th', { scope: 'row' }, x.w), h('td', null, T(`sp_k_${STEPS[Math.min(st.step, KNOWN)]}`)), h('td', null, String(st.right)), h('td', null, String(st.wrong)));
+      })))),
+    h('h4', { class: 'rm-h4' }, T('p_spTests')),
+    tests.length ? h('ul', { class: 'rm-small' }, tests.map((x) => h('li', null, `${fmt(x.date)}: ${x.k}/${x.n} (${x.mode === 'paper' ? T('sp_paper') : T('sp_test')})${x.missed && x.missed.length ? ` — ${x.missed.join(', ')}` : ''}`)))
+      : h('p', { class: 'rm-small' }, T('p_spNoTests')),
+    h('h4', { class: 'rm-h4' }, T('p_spNew')),
+    h('p', { class: 'rm-small' }, T('p_spNewNote')),
+    spellDraft ? h('div', { class: 'rm-sp-edit' },
+      h('input', { type: 'text', class: 'rm-input', placeholder: T('p_spLabel'), value: spellDraft.label, 'data-k': 'sp-label', 'aria-label': T('p_spLabel'), oninput: (e) => { spellDraft.label = e.target.value; } }),
+      h('textarea', { class: 'rm-input rm-sp-textarea', rows: '6', placeholder: 'answer\nblessed\ncommon', 'data-k': 'sp-words', 'aria-label': T('p_spWords'), autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', oninput: (e) => { spellDraft.text = e.target.value; } }, spellDraft.text),
+      h('div', { class: 'rm-row' },
+        button(T('p_spSave'), () => {
+          const words = [...new Set(spellDraft.text.split(/[\n,;]+/).map(cleanWord).filter(Boolean))].slice(0, 25);
+          if (!words.length) { parentMsg = T('p_spEmpty'); update(); return; }
+          const d = new Date();
+          const id = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+          data.spelling.custom = { id, label: spellDraft.label.trim().slice(0, 40), words, at: d.toISOString() };
+          spellDraft = null;
+          parentMsg = T('p_spSaved', { n: words.length });
+          save(data);
+          update();
+        }, { cls: 'primary small', k: 'sp-save' }),
+        button(T('p_spCancel'), () => { spellDraft = null; update(); }, { cls: 'soft small', k: 'sp-cancel' })))
+      : h('div', { class: 'rm-row' },
+        button(T('p_spType'), () => { spellDraft = { label: '', text: list.custom ? list.words.map((x) => x.w).join('\n') : '' }; update(); }, { cls: 'small', k: 'sp-type' }),
+        list.custom ? button(T('p_spSchool'), () => { data.spelling.custom = null; data.spelling.clearedAt = new Date().toISOString(); save(data); update(); }, { cls: 'soft small', k: 'sp-school' }) : null));
+}
+
 // ---------------------------------------------------------------- parent area
 function seg(label, value, options, onPick) {
   return h('div', { class: 'rm-field' },
@@ -3878,6 +4440,7 @@ function viewParent() {
     parentMsg ? h('p', { class: 'rm-small ok', role: 'status' }, parentMsg) : null,
     cloudCard(),
     islandCard(),
+    spellCard(),
     learningSection(),
     prizesSection(),
     h('section', { class: 'rm-card rm-p-sec' },
@@ -4027,7 +4590,7 @@ function voiceCheck() {
     h('div', { class: 'rm-field-l' }, T('vc_title')),
     h('p', { class: 'rm-small' }, T('vc_voice', { lang: lang === 'es' ? 'Español' : 'English', who: (voiceNamesCache && voiceNamesCache[lang]) || '\u2026' })),
     h('p', { class: 'rm-small' }, `${T('vc_last')}: ${last}`),
-    h('p', { class: 'rm-small' }, `iPad: ${vi.ios ? T('p_on') : T('p_off')} \u00b7 ${T('p_sound')}: ${data.settings.sound ? T('p_on') : T('p_off')} \u00b7 v26${vi.unlockError ? ` \u00b7 unlock: ${vi.unlockError}` : ''}${vi.mediaError ? ` \u00b7 player: ${vi.mediaError}` : ''}`),
+    h('p', { class: 'rm-small' }, `iPad: ${vi.ios ? T('p_on') : T('p_off')} \u00b7 ${T('p_sound')}: ${data.settings.sound ? T('p_on') : T('p_off')} \u00b7 v27${vi.unlockError ? ` \u00b7 unlock: ${vi.unlockError}` : ''}${vi.mediaError ? ` \u00b7 player: ${vi.mediaError}` : ''}`),
     button(T('vc_test'), () => { unlockMedia(); unlockAudio(); sayLine('hello'); setTimeout(() => { if (screen === 'parent') update(); }, 1200); }, { cls: 'small', ic: 'read', k: 'vc-test' }));
 }
 
@@ -4043,6 +4606,7 @@ function resetProgress() {
 
 // ---------------------------------------------------------------- keyboard
 function onKey(e) {
+  if (spellKey(e)) return;
   if (screen === 'pin' && /^[0-9]$/.test(e.key)) { e.preventDefault(); pinPress(e.key); return; }
   if (screen === 'pin' && e.key === 'Enter' && pin.kind === 'parent' && pin.mode === 'gate') { e.preventDefault(); gateCheck(); return; }
   if (screen === 'pin' && e.key === 'Backspace') { e.preventDefault(); pin.entry = pin.entry.slice(0, -1); update(); return; }

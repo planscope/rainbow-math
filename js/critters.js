@@ -5,7 +5,7 @@
 // finished adventure hatches a new baby friend: one of the 12 kinds, in its own color,
 // with its own little hat or bow and its own name. A baby's id carries everything
 // about it ('bunny.k3x9qa'), so two devices always draw the same friend.
-import { CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=26';
+import { CREATURE_NAMES, CREATURE_ORDER } from './i18n.js?v=27';
 
 export const SPECIES = CREATURE_ORDER;
 

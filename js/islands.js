@@ -7,7 +7,7 @@
 //
 // Only the device that also knows the child's progress code can change or close her
 // island (the server keeps a fingerprint of a key made from it).
-import { islandSnap, cleanGift } from './critters.js?v=26';
+import { islandSnap, cleanGift } from './critters.js?v=27';
 
 async function sha(text) {
   const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));

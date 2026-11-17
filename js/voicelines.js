@@ -156,6 +156,14 @@ export const LINES = {
   visit_hi: { en: "[excited] Let's fly to your friend's island!", es: '[excited] ¡Vamos volando a la isla de tu amigo!' },
   visit_gift: { en: '[happy] What a sweet gift! Your friend will see it!', es: '[happy] ¡Qué lindo regalo! ¡Lo va a ver!' },
   visit_got: { en: '[excited] Someone visited your island and left a gift!', es: '[excited] ¡Alguien visitó tu isla y te dejó un regalo!' },
+  // ---- spelling words (v27)
+  sp_hello: { en: ["[cheerful] Spelling time! Let's learn this week's words.", "[excited] Let's practice your spelling words!"], es: '[cheerful] ¡Hora de ortografía! Vamos a aprender las palabras de la semana.' },
+  sp_right: { en: ['[excited] You spelled it!', '[happy] Yes! Every letter is right!', '[excited] Woohoo! Perfect spelling!'], es: '[excited] ¡La escribiste bien!' },
+  sp_right_after: { en: ['[happy] There it is! Good fixing!', "[cheerful] You got it! Let's keep going."], es: '[happy] ¡Ahí está! ¡Muy bien arreglada!' },
+  sp_almost: { en: ["[gently] So close! Look at the letters to fix, then type it once more.", '[gently] Almost! Check the pink letters and try again.'], es: '[gently] ¡Casi! Mira las letras que hay que arreglar y escríbela otra vez.' },
+  sp_done: { en: ['[excited] Great spelling practice! Your words are getting stronger!', '[happy] All done! You practiced so well!'], es: '[excited] ¡Muy buena práctica! ¡Tus palabras están cada vez más fuertes!' },
+  sp_test_all: { en: "[excited] Every single word right! You're ready for the test!", es: '[excited] ¡Todas las palabras bien! ¡Estás lista para el examen!' },
+  sp_paper_check: { en: "[cheerful] Let's check your paper together! Look at each word.", es: '[cheerful] ¡Vamos a revisar tu hoja juntas! Mira cada palabra.' },
   one_more_star: { en: ['[excited] Just one more star to the next level!', '[happy] One more star and you level up!'], es: '[excited] ¡Solo una estrella más para el siguiente nivel!' },
   prize_close: { en: ["[excited] Almost there! Just a few more rainbow pieces for your prize!", "[gasps] You're so close to your prize! Keep going!"], es: '[excited] ¡Ya casi! ¡Unas piezas más de arcoíris para tu premio!' },
 };
@@ -196,7 +204,7 @@ export const clipId = (lang, key, v = null, variant = 0) => `${lang}-${key}${v =
 
 // Every recording: { id: { lang, key, v, text } }
 export function allLines() {
-  const out = { ...allExplanations('en'), ...allReadPieces('en'), ...allReadPieces('es') };
+  const out = { ...allExplanations('en'), ...allReadPieces('en'), ...allReadPieces('es'), ...allSpellPieces() };
   for (const lang of ['en', 'es']) {
     for (const [key, line] of Object.entries(LINES)) {
       const n = variants(lang, key).length;
@@ -213,8 +221,8 @@ export function allLines() {
 // her screen ("Nine plus two... how many is that?"). Each explanation is recorded whole,
 // once per number combination that can really happen (found from the step builder).
 // Only the numbers a line needs are used, so there are about 430 English recordings.
-import { buildSteps } from './math.js?v=26';
-import { buildMulSteps, allMulProblems } from './mult.js?v=26';
+import { buildSteps } from './math.js?v=27';
+import { buildMulSteps, allMulProblems } from './mult.js?v=27';
 
 export const EXPLAIN = {
   x_ones_sum: { from: 'w_ones_sum', params: ['x', 'y'], en: "[curious] Let's add the ones. {x} plus {y}... how many is that?" },
@@ -286,7 +294,8 @@ export function allExplanations(lang = 'en') {
 // ---------------------------------------------------------------- "Read to me" (English)
 // Problems and stories have different numbers every time, so "Read to me" joins short
 // recordings: the story pieces between the numbers, the numbers 0-100, and "What is ... plus ...?".
-import { STORIES } from './i18n.js?v=26';
+import { STORIES } from './i18n.js?v=27';
+import { allSpellPieces } from './spell.js?v=27';
 
 const OPN = { '+': 'add', '-': 'sub', '×': 'mul' };
 const READ_WORDS = {

@@ -85,6 +85,24 @@ function mergeIsland(a, b, newerIsLocal) {
   };
 }
 
+// Spelling: per word, the copy that practiced it more (and the furthest step); every test; the newer typed list.
+function mergeSpelling(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  const words = { ...(b.words || {}) };
+  for (const [k, x] of Object.entries(a.words || {})) {
+    const y = words[k];
+    if (!y) { words[k] = x; continue; }
+    const more = (x.seen || 0) >= (y.seen || 0) ? x : y;
+    words[k] = { ...more, step: Math.max(x.step || 0, y.step || 0) };
+  }
+  const ca = a.custom, cb = b.custom;
+  const custom = !ca ? cb || null : !cb ? ca : String(ca.at || '') >= String(cb.at || '') ? ca : cb;
+  // a grown-up going back to the school list: whichever choice is newer wins
+  const clearedAt = String(a.clearedAt || '') > String(b.clearedAt || '') ? a.clearedAt : b.clearedAt || a.clearedAt || '';
+  return { words, tests: unionByDate(a.tests, b.tests), custom: custom && clearedAt > String(custom.at || '') ? null : custom, clearedAt };
+}
+
 const minDefined = (x, y) => (x == null ? (y == null ? null : y) : y == null ? x : Math.min(x, y));
 
 export function mergeData(local, remote) {
@@ -141,6 +159,7 @@ export function mergeData(local, remote) {
       treatsFrom: minDefined(lr.treatsFrom, rr.treatsFrom),
     },
     island: mergeIsland(local.island, remote.island, newer === local),
+    spelling: mergeSpelling(local.spelling, remote.spelling),
     // a problem half-done on this device stays here
     active: local.active || null,
     visits: Math.max(local.visits || 0, remote.visits || 0),
